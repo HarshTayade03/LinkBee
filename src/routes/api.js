@@ -4,11 +4,19 @@ const urlService = require('../services/urlService');
 const analyticsService = require('../services/analyticsService');
 const config = require('../config/env');
 const { validateShortenRequest } = require('../middlewares/validate');
+const { createRateLimiter } = require('../middlewares/rateLimiter');
+
+// Rate limit POST /shorten to 10 requests per 60 seconds per IP
+const shortenRateLimiter = createRateLimiter({
+  windowSeconds: 60,
+  maxRequests: 10,
+  keyPrefix: 'rl:shorten',
+});
 
 /**
  * POST /api/v1/shorten
  */
-router.post('/shorten', validateShortenRequest, async (req, res) => {
+router.post('/shorten', shortenRateLimiter, validateShortenRequest, async (req, res) => {
   try {
     const { originalUrl, customAlias, expiresAt } = req.body;
 

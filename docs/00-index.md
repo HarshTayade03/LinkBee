@@ -11,7 +11,7 @@ Welcome! This study guide accompanies our production-grade URL Shortener. It is 
 | **[02-correctness-and-robustness.md](02-correctness-and-robustness.md)** | **Phase 2: Correctness & Robustness** | Input validation, SSRF/scheme blocking, custom aliases, link expiry, error handling standards, and automated testing. | Completed |
 | **[03-caching-with-redis.md](03-caching-with-redis.md)** | **Phase 3: Caching with Redis** | Cache-aside pattern, TTL policies, handling cache stampedes/failures gracefully, and latency impact. | Completed |
 | **[04-click-analytics.md](04-click-analytics.md)** | **Phase 4: Click Analytics** | Asynchronous fire-and-forget logging, indexing strategies (`EXPLAIN ANALYZE`), aggregation queries, and IP privacy. | Completed |
-| **[05-rate-limiting.md](05-rate-limiting.md)** | **Phase 5: Rate Limiting** | Redis atomic fixed-window limiter (`INCR` + `EXPIRE`), reverse proxy trust, and DDoS mitigation. | Pending |
+| **[05-rate-limiting.md](05-rate-limiting.md)** | **Phase 5: Rate Limiting** | Redis atomic fixed-window limiter (`INCR` + `EXPIRE`), reverse proxy trust, and DDoS mitigation. | Completed |
 | **[06-security-hardening.md](06-security-hardening.md)** | **Phase 6: Security Hardening** | OWASP Top 10 breakdown, CSP/Helmet, per-link management tokens (hashing vs encryption), database least-privilege. | Pending |
 | **[07-frontend.md](07-frontend.md)** | **Phase 7: Accessible Frontend** | Semantic HTML, CSS design tokens, DOM security (safe rendering without innerHTML), fetch & error handling. | Pending |
 | **[08-benchmarks.md](08-benchmarks.md)** | **Phase 8: Load Testing & Real Numbers** | k6 / autocannon load tests, latency distributions (p50, p95, p99), cache performance validation. | Pending |

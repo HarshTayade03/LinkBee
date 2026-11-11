@@ -4,6 +4,12 @@ const redirectRoutes = require('./routes/redirect');
 
 const app = express();
 
+// Trust proxy settings: if running behind reverse proxy (Heroku, Render, Cloudflare),
+// trust the first hop to accurately populate req.ip from X-Forwarded-For
+if (process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
 // Parse JSON request bodies (with 10kb limit to prevent payload bombing)
 app.use(express.json({ limit: '10kb' }));
 

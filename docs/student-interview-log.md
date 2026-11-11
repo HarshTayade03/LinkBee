@@ -163,8 +163,6 @@ This document records the interview questions asked at the end of each phase, yo
   > Decoupling analytics via an asynchronous fire-and-forget approach ensures that the end-user's redirect latency remains minimal (sub-2ms from cache). If we forced the redirect to wait for a database write (`await db.query(...)`), redirect response times would increase tenfold to 20ms+ and could bottleneck under write locks.
   >
   > **The Trade-off**: In the rare event of an unexpected server process crash, SIGKILL, or power loss between the redirect dispatch and the execution of the asynchronous task in the event loop, that individual click event is lost. In real-world web analytics, a 99.9% counting accuracy guarantee without latency penalties is considered an optimal engineering trade-off.
-- **Follow-up 1**: How do high-scale services (e.g. Bitly) handle analytics at 100k events/second?
-  - **Answer**: They publish click events to a high-throughput distributed log (like Apache Kafka or AWS Kinesis) or aggregate counts in Redis memory using HyperLogLog / atomic increments, which an asynchronous background batch worker periodically flushes to an analytical database (like ClickHouse or Snowflake).
 
 ---
 
@@ -189,3 +187,45 @@ This document records the interview questions asked at the end of each phase, yo
   > From a product and systems engineering perspective:
   > 1. Link owners only need aggregate geographic and referral insights, not individual users' private IPs.
   > 2. Eliminating IP storage reduces row size in the `clicks` table by 16–45 bytes per row, saving gigabytes of disk space and memory at scale.
+
+---
+
+## Phase 5: Rate Limiting
+
+### Question 1: Fixed Window vs Sliding Window vs Token Bucket
+- **Question**: Compare Fixed Window vs Sliding Window vs Token Bucket rate limiting. Why is Fixed Window sufficient for our URL shortener?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > - **Fixed Window**: Tracks request count inside fixed time blocks (e.g. 0-60s, 60-120s) using a single Redis integer with TTL. Extremely memory-efficient and fast, but allows a burst of $2 \times \text{limit}$ across window boundaries (e.g. at second 59 and 61).
+  > - **Sliding Window Log**: Stores timestamps in a sorted set (`ZADD`). Completely smooths boundaries, but consumes significant memory by storing every request timestamp.
+  > - **Token Bucket**: Accumulates tokens at a constant refill rate. Ideal for handling natural traffic bursts with sustained rate limits, but requires stateful floating-point math.
+  >
+  > For link creation abuse prevention, our objective is stopping malicious automated scripts and spammers from generating millions of links. A fixed window with a 60-second boundary is more than sufficient, uses virtually zero RAM, and executes in sub-millisecond time.
+
+---
+
+### Question 2: Atomicity in Redis Rate Limiting (`INCR` + `EXPIRE`)
+- **Question**: What race condition can occur when implementing a rate limiter in Redis with `INCR` and `EXPIRE`, and how does pipelining or Lua scripting prevent it?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > If an application calls `INCR key` and then subsequently calls `EXPIRE key 60` in two separate operations, a crash, network partition, or deployment restart between the two commands leaves the key in Redis without an expiration time (`TTL = -1`). That IP address will remain permanently throttled forever, unable to make requests even after the window has passed.
+  >
+  > We solve this using a **Redis pipeline** or an atomic Lua script:
+  > 1. We issue both `INCR` and `TTL` together in a single pipeline.
+  > 2. If `TTL` returns `-1` (indicating a brand-new key), we immediately set the expiry.
+  > 3. Alternatively, Redis 7+ allows `INCRBY` or `SET NX EX` to be combined into single atomic operations, ensuring keys are never orphaned without a TTL.
+
+---
+
+### Question 3: The `X-Forwarded-For` Header and `trust proxy`
+- **Question**: What is the `X-Forwarded-For` header, and why can misconfiguring Express's `trust proxy` setting allow attackers to bypass rate limits?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > When an application runs behind a reverse proxy (e.g. AWS ALB, Cloudflare, NGINX), the incoming TCP connection to Node.js originates from the reverse proxy's internal private IP. The proxy records the original client's IP in the `X-Forwarded-For` header:
+  > `X-Forwarded-For: <client_ip>, <proxy_1_ip>, <proxy_2_ip>`.
+  >
+  > If an engineer blindly enables `app.set('trust proxy', true)` without restriction, Express blindly trusts whatever client IP is passed in the header. An attacker can write a script that sends a fake header:
+  > `X-Forwarded-For: 198.51.100.1`, then `198.51.100.2`, etc.
+  > Express uses the spoofed IP for `req.ip`, giving the attacker a brand-new rate-limit bucket on every single request and completely bypassing the rate limiter!
+  >
+  > **Mitigation**: Configure `trust proxy` to trust only the exact number of verified proxy hops (e.g., `app.set('trust proxy', 1)` for a single cloud edge proxy) or specify the proxy subnet CIDR.
