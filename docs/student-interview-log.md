@@ -64,10 +64,6 @@ This document records the interview questions asked at the end of each phase, yo
   > 2. **Business Intelligence Leakage**: Competitors can shorten a link at 9:00 AM and another at 5:00 PM, subtract the IDs, and calculate our exact daily link generation volume and business growth rate.
   >
   > **Solution**: Using cryptographically secure random Base62 codes (e.g. 7 characters = $62^7 \approx 3.52\text{ trillion}$ combinations) makes sequential guessing mathematically infeasible.
-- **Follow-up 1**: Does Base62 encryption exist, or is Base62 merely an encoding?
-  - **Answer**: Base62 is strictly a reversible positional encoding (like Base64 or Hex), not encryption. It provides zero confidentiality by itself; security comes from the high entropy/randomness of the generated bits before encoding.
-- **Follow-up 2**: If an interviewer asks: *"What if we use Feistel ciphers or format-preserving encryption on the sequential ID to avoid collisions while preventing enumeration?"*
-  - **Answer**: That is a valid alternative! A pseudo-random permutation (like a small-domain Feistel cipher or Skip32) maps sequential IDs to pseudo-random numbers with zero collisions. However, it adds cryptographic complexity and key management overhead, whereas random generation + DB unique retry is simpler to reason about and operates with negligible collision rates.
 
 ---
 
@@ -78,10 +74,6 @@ This document records the interview questions asked at the end of each phase, yo
   > Establishing a new TCP connection to PostgreSQL requires a three-way TCP handshake, TLS negotiation (if encrypted), process forking or authentication in PostgreSQL, and backend memory allocation (typically several megabytes per backend process). Under high web traffic (e.g., 2,000 requests/sec), creating and tearing down connections per request causes massive latency overhead and exhausts PostgreSQL's connection limits (`FATAL: too many connections`).
   >
   > A **Connection Pool** maintains a warm set of active, reusable database connections (e.g., `max: 20`). Incoming HTTP requests borrow an idle connection from the pool, execute their query in milliseconds, and release it back to the pool immediately.
-- **Follow-up 1**: Why not set `max: 500` in the pool so every request has a dedicated connection?
-  - **Answer**: PostgreSQL uses a process-per-connection architecture. Excessive connections create CPU context-switching thrashing and RAM exhaustion. Keeping pool sizes small (e.g., 20–50 connections) actually yields higher aggregate throughput and lower p99 latency than hundreds of competing connections.
-- **Follow-up 2**: How do we handle connection pooling when scaling horizontally to 50 Node.js server instances?
-  - **Answer**: When many app instances multiply the total pool count ($50 \text{ instances} \times 20 = 1{,}000 \text{ connections}$), we introduce an external connection pooler like **PgBouncer** or Supabase Supavisor in front of PostgreSQL to multiplex thousands of client connections onto a small set of database backends.
 
 ---
 
@@ -92,10 +84,6 @@ This document records the interview questions asked at the end of each phase, yo
   > In the database, the `short_code` column has a `UNIQUE` constraint backed by a unique B-Tree index. PostgreSQL guarantees ACID transaction isolation. Whichever request commits first succeeds; the second concurrent insert violates the unique constraint and is rolled back, returning PostgreSQL error code `23505` (`unique_violation`).
   >
   > In our application layer (`urlService.js`), we wrap the insert in an automated retry loop. When error `23505` is caught, the app does not crash or return a 500 to the client; instead, it generates a fresh random 7-character Base62 code and retries the insert (up to 3 attempts), ensuring the user's request succeeds seamlessly.
-- **Follow-up 1**: What is the probability of a collision with 7 Base62 characters?
-  - **Answer**: $62^7 \approx 3.52 \times 10^{12}$ combinations. By the Birthday Paradox, we would need to generate over 2 million URLs before the probability of even a single collision reaches $0.1\%$.
-- **Follow-up 2**: Why not do a `SELECT WHERE short_code = $1` before the `INSERT` instead of relying on the database error?
-  - **Answer**: Checking before inserting introduces a **Time-of-Check to Time-of-Use (TOCTOU)** race condition. If two requests check at the exact same millisecond, both will see that the code is free and both will attempt to insert it. The database `UNIQUE` constraint is the only authoritative source of truth in a concurrent system.
 
 ---
 
@@ -108,10 +96,6 @@ This document records the interview questions asked at the end of each phase, yo
   > Blacklisting relies on enumerating every dangerous input, which is fundamentally fragile because the list of dangerous or novel URI schemes is vast and platform-dependent (e.g. `javascript:`, `vbscript:`, `data:`, `file:`, `blob:`, `about:`, `chrome:`). Attackers constantly discover bypasses or edge-case encodings that slip past blacklist filters.
   >
   > **Whitelisting** (positive security model) defines the exact, small set of permitted behaviors (`['http:', 'https:']`) and rejects everything else by default. If a new malicious URI scheme or obscure browser quirk emerges tomorrow, our server automatically rejects it without needing code changes.
-- **Follow-up 1**: What if a user wants to shorten an `ftp:` or `mailto:` link?
-  - **Answer**: In a public web shortener, the primary use case is web navigation. Permitting non-HTTP schemes introduces security risks (like triggering local mail clients or FTP exploits). If business requirements genuinely demand supporting `mailto:`, it should be added explicitly to the whitelist with strict email format validation, never by disabling the whitelist.
-- **Follow-up 2**: How does the WHATWG URL standard parser help prevent validation bypasses?
-  - **Answer**: Hand-rolled regular expressions often fail to handle edge cases like mixed-case schemes (`JaVaScRiPt:`), whitespace, or leading control characters. Using Node's native `new URL()` parser ensures input is parsed according to standard browser URL normalization rules before validation checks occur.
 
 ---
 
@@ -122,10 +106,6 @@ This document records the interview questions asked at the end of each phase, yo
   > `404 Not Found` means the server has not found anything matching the Request-URI, with no indication of whether the condition is temporary or permanent. Clients, web search engine crawlers (Googlebot), and proxies assume the resource might appear later, so they will continue to re-request and re-index the URL periodically.
   >
   > `410 Gone` explicitly signals that the target resource was intentionally removed or expired, and the condition is **permanent**. Search engines immediately de-index 410 URLs from search results, web crawlers stop wasting crawl budget hitting the server, and API clients know not to retry the request.
-- **Follow-up 1**: How does this impact database design for expired links?
-  - **Answer**: It requires us to keep tombstone records or timestamps for recently expired links rather than immediately running a hard `DELETE`. If we hard-deleted expired links instantly, our server wouldn't know if a code never existed or if it expired, forcing us to return a generic 404.
-- **Follow-up 2**: When should expired records be permanently deleted (purged)?
-  - **Answer**: Through an asynchronous background cron/maintenance worker that soft-deletes or archives records older than a retention window (e.g. 30–90 days after expiration) to reclaim database storage while maintaining the 410 guarantee during the active expiration window.
 
 ---
 
@@ -136,10 +116,6 @@ This document records the interview questions asked at the end of each phase, yo
   > SSRF is an attack where an attacker induces a backend server to make HTTP requests to an unintended, internal destination that is not accessible from the public internet.
   >
   > In public cloud providers (AWS EC2, Google Cloud Engine, Azure VMs), the IP address `169.254.169.254` is the link-local **Instance Metadata Service (IMDS)**. When an internal application requests `http://169.254.169.254/latest/meta-data/iam/security-credentials/`, the cloud hypervisor returns the virtual machine's temporary IAM security credentials, private keys, and environment variables. If a URL shortener (or a link preview generator) fetches or redirects to this address without filtering, an attacker can steal the cloud role credentials and take over the entire cloud infrastructure.
-- **Follow-up 1**: Does blocking only string `"169.254.169.254"` completely protect against SSRF?
-  - **Answer**: Not by itself! Sophisticated attackers use DNS Rebinding, octal/hex IP representations (e.g., `0x7f000001` for `127.0.0.1`), IPv6 representations (`[::1]`), or custom domains that resolve to private IPs (`10.0.0.0/8`, `192.168.0.0/16`). Complete SSRF protection in production requires resolving the DNS hostname before fetching and verifying that the resolved IP does not fall within RFC 1918 private CIDR ranges.
-- **Follow-up 2**: What is IMDSv2 and how does AWS defend against SSRF at the cloud level?
-  - **Answer**: AWS introduced IMDSv2, which requires session-oriented requests with a `PUT` request to retrieve a secret token before querying metadata, and sets an IP hop limit (TTL = 1) on network packets. Since open redirects or SSRF GET requests cannot send custom `PUT` headers across network hops, IMDSv2 blocks metadata theft even if application-level checks fail.
 
 ---
 
@@ -152,10 +128,6 @@ This document records the interview questions asked at the end of each phase, yo
   > In **Cache-Aside (Lazy Loading)**, the application first checks the cache. On a hit, it returns immediately; on a miss, it queries the database, writes the result to the cache with a TTL, and returns. In **Write-Through**, every new link creation writes synchronously to both the database and the cache simultaneously.
   >
   > For a URL shortener, **Cache-Aside is vastly superior** because URL access distributions are heavily skewed (the 80/20 Pareto rule). Millions of shortened URLs are created that are clicked once or never clicked at all. Write-Through would saturate expensive Redis RAM with dormant links that consume memory without ever serving traffic. Cache-Aside ensures RAM is reserved exclusively for "hot" URLs that users actually visit.
-- **Follow-up 1**: What is the main drawback of Cache-Aside?
-  - **Answer**: A cache miss incurs a latency penalty (two network hops: cache read + database query + cache write), and concurrent requests for an un-cached link can cause a cache stampede.
-- **Follow-up 2**: How does Write-Behind (Write-Back) compare?
-  - **Answer**: Write-Behind writes directly to cache and asynchronously flushes to the database. While fast for writes, it risks permanent data loss if Redis crashes before dirty data is written to disk, making it unsuitable for persistent URL creation.
 
 ---
 
@@ -169,8 +141,6 @@ This document records the interview questions asked at the end of each phase, yo
   > 1. **Distributed Mutex / Lock (`SET NX EX`)**: The first request to encounter the miss acquires a short lock in Redis to recompute the value; other requests wait briefly or retry.
   > 2. **Probabilistic Early Expiration (XFetch algorithm)**: Background workers re-cache the value probabilistically *before* the TTL actually expires based on read frequency and computation time.
   > 3. **Singleflight Pattern (Request Coalescing)**: In-process duplicate requests share the exact same promise/future, executing only one DB read for all waiting requests.
-- **Follow-up 1**: What is a simple operational defense against stampedes?
-  - **Answer**: Adding jitter to TTLs (e.g. $TTL \pm \text{random}(60s)$) so that multiple keys populated around the same time do not expire at the exact same second.
 
 ---
 
@@ -181,3 +151,41 @@ This document records the interview questions asked at the end of each phase, yo
   > `volatile-lru` only evicts keys that have an explicit expiration (TTL) set when memory reaches the cap. If memory fills up with keys that lack a TTL, Redis stops accepting writes and throws `OOM command not allowed when used memory > 'maxmemory'`.
   >
   > `allkeys-lru` evicts the least recently used key across the **entire** key space, regardless of whether a TTL was set. We chose `allkeys-lru` because in our URL shortener, PostgreSQL is the permanent, durable system of record. Redis is treated strictly as an ephemeral accelerator. If memory is full, evicting any cold short-link is safe because it can always be re-fetched from PostgreSQL on demand.
+
+---
+
+## Phase 4: Click Analytics
+
+### Question 1: Asynchronous Analytics & Data Loss Trade-off
+- **Question**: Why should click analytics recording be decoupled from the HTTP redirect response, and what is the trade-off of using an asynchronous fire-and-forget pattern?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > Decoupling analytics via an asynchronous fire-and-forget approach ensures that the end-user's redirect latency remains minimal (sub-2ms from cache). If we forced the redirect to wait for a database write (`await db.query(...)`), redirect response times would increase tenfold to 20ms+ and could bottleneck under write locks.
+  >
+  > **The Trade-off**: In the rare event of an unexpected server process crash, SIGKILL, or power loss between the redirect dispatch and the execution of the asynchronous task in the event loop, that individual click event is lost. In real-world web analytics, a 99.9% counting accuracy guarantee without latency penalties is considered an optimal engineering trade-off.
+- **Follow-up 1**: How do high-scale services (e.g. Bitly) handle analytics at 100k events/second?
+  - **Answer**: They publish click events to a high-throughput distributed log (like Apache Kafka or AWS Kinesis) or aggregate counts in Redis memory using HyperLogLog / atomic increments, which an asynchronous background batch worker periodically flushes to an analytical database (like ClickHouse or Snowflake).
+
+---
+
+### Question 2: Composite Indexing & Index-Only Scan
+- **Question**: Explain why a composite index on `(url_id, clicked_at DESC)` was chosen instead of two separate indexes on `url_id` and `clicked_at`. What is an Index-Only Scan?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > When querying analytics for a specific link (`WHERE url_id = $1 AND clicked_at >= NOW() - INTERVAL '30 days' ORDER BY date`), PostgreSQL can use a composite index `(url_id, clicked_at DESC)` to jump directly to the target URL's entries and scan them in pre-sorted chronological order in a single operation.
+  >
+  > If we had two single-column indexes, PostgreSQL would have to perform a Bitmap Index Scan (scanning two separate B-trees and intersecting their bit arrays in memory) and then sort the results, which is significantly slower.
+  >
+  > An **Index-Only Scan** occurs when all columns required by the query (`url_id` and `clicked_at`) are present directly inside the index tree itself. PostgreSQL retrieves the data without ever reading the main table heap (`Heap Fetches: 0`), resulting in sub-millisecond execution times.
+
+---
+
+### Question 3: Privacy by Design & IP Elimination
+- **Question**: From a data privacy and systems engineering perspective, why should a URL shortener avoid storing full client IP addresses in its database?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > Under global data protection regulations (GDPR in Europe, CCPA in California), an IP address is legally recognized as Personally Identifiable Information (PII). Storing full IP addresses incurs heavy regulatory compliance burdens: companies must support "Right to be Forgotten" (data deletion) requests, maintain detailed audit logs, and risk severe fines in the event of a database leak.
+  >
+  > From a product and systems engineering perspective:
+  > 1. Link owners only need aggregate geographic and referral insights, not individual users' private IPs.
+  > 2. Eliminating IP storage reduces row size in the `clicks` table by 16–45 bytes per row, saving gigabytes of disk space and memory at scale.

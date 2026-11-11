@@ -2,24 +2,24 @@ const express = require('express');
 const router = express.Router();
 const urlService = require('../services/urlService');
 const cacheService = require('../services/cacheService');
+const analyticsService = require('../services/analyticsService');
 
 /**
  * GET /:code
- * Hot redirection path implemented via Cache-Aside pattern.
- * 1. Check Redis cache. On Cache Hit -> redirect immediately with HTTP 302.
- * 2. On Cache Miss -> Query PostgreSQL.
- *    - If expired: return HTTP 410 Gone (evict from cache).
- *    - If not found: return HTTP 404 Not Found.
- *    - If found: write to Redis with TTL and redirect with HTTP 302.
+ * Hot redirection path:
+ * 1. Checks Redis cache.
+ * 2. On Miss: checks PostgreSQL and caches result.
+ * 3. Records click event asynchronously (fire-and-forget) without delaying the HTTP 302 response.
  */
 router.get('/:code', async (req, res) => {
   try {
     const { code } = req.params;
+    const referrer = req.get('referrer') || req.get('referer') || null;
+    const userAgent = req.get('user-agent') || null;
 
-    // Step 1: Check Redis cache first
+    // 1. Check Redis cache first
     const cached = await cacheService.getCachedUrl(code);
     if (cached) {
-      // Check if cached entry has passed expiration
       if (cached.expiresAt && new Date() > new Date(cached.expiresAt)) {
         await cacheService.deleteCachedUrl(code);
         return res.status(410).json({
@@ -31,12 +31,18 @@ router.get('/:code', async (req, res) => {
         });
       }
 
-      // Cache Hit: redirect immediately
+      // Asynchronous non-blocking analytics logging
+      analyticsService.recordClickAsync({
+        urlId: cached.id,
+        referrer,
+        userAgent,
+      });
+
       res.setHeader('X-Cache', 'HIT');
       return res.redirect(302, cached.originalUrl);
     }
 
-    // Step 2: Cache Miss -> Fallback to PostgreSQL
+    // 2. Cache Miss -> Query PostgreSQL
     const { record, isExpired } = await urlService.getUrlByCode(code);
 
     if (!record) {
@@ -61,8 +67,19 @@ router.get('/:code', async (req, res) => {
       });
     }
 
-    // Step 3: Populate cache asynchronously with TTL for future requests
-    await cacheService.setCachedUrl(record.short_code, record.original_url, record.expires_at);
+    // 3. Populate cache with id for subsequent clicks
+    await cacheService.setCachedUrl(record.short_code, {
+      id: record.id,
+      originalUrl: record.original_url,
+      expiresAt: record.expires_at,
+    });
+
+    // Asynchronous non-blocking analytics logging
+    analyticsService.recordClickAsync({
+      urlId: record.id,
+      referrer,
+      userAgent,
+    });
 
     res.setHeader('X-Cache', 'MISS');
     return res.redirect(302, record.original_url);
