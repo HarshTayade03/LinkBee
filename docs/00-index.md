@@ -13,7 +13,7 @@ Welcome! This study guide accompanies our production-grade URL Shortener. It is 
 | **[04-click-analytics.md](04-click-analytics.md)** | **Phase 4: Click Analytics** | Asynchronous fire-and-forget logging, indexing strategies (`EXPLAIN ANALYZE`), aggregation queries, and IP privacy. | Completed |
 | **[05-rate-limiting.md](05-rate-limiting.md)** | **Phase 5: Rate Limiting** | Redis atomic fixed-window limiter (`INCR` + `EXPIRE`), reverse proxy trust, and DDoS mitigation. | Completed |
 | **[06-security-hardening.md](06-security-hardening.md)** | **Phase 6: Security Hardening** | OWASP Top 10 breakdown, CSP/Helmet, per-link management tokens (hashing vs encryption), database least-privilege. | Completed |
-| **[07-frontend.md](07-frontend.md)** | **Phase 7: Accessible Frontend** | Semantic HTML, CSS design tokens, DOM security (safe rendering without innerHTML), fetch & error handling. | Pending |
+| **[07-frontend.md](07-frontend.md)** | **Phase 7: Accessible Frontend** | Semantic HTML, CSS design tokens, DOM security (safe rendering without innerHTML), fetch & error handling. | Completed |
 | **[08-benchmarks.md](08-benchmarks.md)** | **Phase 8: Load Testing & Real Numbers** | k6 / autocannon load tests, latency distributions (p50, p95, p99), cache performance validation. | Pending |
 | **[09-packaging-and-ci.md](09-packaging-and-ci.md)** | **Phase 9: Packaging & CI/CD** | Multi-stage Docker builds, non-root execution, GitHub Actions workflows, lockfile security audits. | Pending |
 | **[10-deployment.md](10-deployment.md)** | **Phase 10: Free Tier Cloud Deployment** | Production deployment, managed databases, environment variables, SSL/TLS, and handling free-tier cold starts. | Pending |

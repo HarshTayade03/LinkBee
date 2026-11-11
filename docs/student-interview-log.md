@@ -182,9 +182,7 @@ This document records the interview questions asked at the end of each phase, yo
 - **Model Answer**:
   > Under global data protection regulations (GDPR in Europe, CCPA in California), an IP address is legally recognized as Personally Identifiable Information (PII). Storing full IP addresses incurs heavy regulatory compliance burdens: companies must support "Right to be Forgotten" (data deletion) requests, maintain detailed audit logs, and risk severe fines in the event of a database leak.
   >
-  > From a product and systems engineering perspective:
-  > 1. Link owners only need aggregate geographic and referral insights, not individual users' private IPs.
-  > 2. Eliminating IP storage reduces row size in the `clicks` table by 16–45 bytes per row, saving gigabytes of disk space and memory at scale.
+  > Eliminating IP storage reduces row size in the `clicks` table by 16–45 bytes per row, saving gigabytes of disk space and memory at scale.
 
 ---
 
@@ -194,11 +192,11 @@ This document records the interview questions asked at the end of each phase, yo
 - **Question**: Compare Fixed Window vs Sliding Window vs Token Bucket rate limiting. Why is Fixed Window sufficient for our URL shortener?
 - **Status**: Self-study review (Recorded model answer).
 - **Model Answer**:
-  > - **Fixed Window**: Tracks request count inside fixed time blocks (e.g. 0-60s, 60-120s) using a single Redis integer with TTL. Extremely memory-efficient and fast, but allows a burst of $2 \times \text{limit}$ across window boundaries (e.g. at second 59 and 61).
+  > - **Fixed Window**: Tracks request count inside fixed time blocks (e.g. 0-60s) using a single Redis integer with TTL. Extremely memory-efficient and fast, but allows a burst of $2 \times \text{limit}$ across window boundaries.
   > - **Sliding Window Log**: Stores timestamps in a sorted set (`ZADD`). Completely smooths boundaries, but consumes significant memory by storing every request timestamp.
   > - **Token Bucket**: Accumulates tokens at a constant refill rate. Ideal for handling natural traffic bursts with sustained rate limits, but requires stateful floating-point math.
   >
-  > For link creation abuse prevention, our objective is stopping malicious automated scripts and spammers from generating millions of links. A fixed window with a 60-second boundary is more than sufficient, uses virtually zero RAM, and executes in sub-millisecond time.
+  > For link creation abuse prevention, a fixed window with a 60-second boundary is more than sufficient, uses virtually zero RAM, and executes in sub-millisecond time.
 
 ---
 
@@ -208,10 +206,7 @@ This document records the interview questions asked at the end of each phase, yo
 - **Model Answer**:
   > If an application calls `INCR key` and then subsequently calls `EXPIRE key 60` in two separate operations, a crash, network partition, or deployment restart between the two commands leaves the key in Redis without an expiration time (`TTL = -1`). That IP address will remain permanently throttled forever, unable to make requests even after the window has passed.
   >
-  > We solve this using a **Redis pipeline** or an atomic Lua script:
-  > 1. We issue both `INCR` and `TTL` together in a single pipeline.
-  > 2. If `TTL` returns `-1` (indicating a brand-new key), we immediately set the expiry.
-  > 3. Alternatively, Redis 7+ allows `INCRBY` or `SET NX EX` to be combined into single atomic operations, ensuring keys are never orphaned without a TTL.
+  > We solve this using a **Redis pipeline**: bundling `INCR` and `TTL` together, checking if `TTL === -1`, and immediately setting the expiration if needed.
 
 ---
 
@@ -219,14 +214,9 @@ This document records the interview questions asked at the end of each phase, yo
 - **Question**: What is the `X-Forwarded-For` header, and why can misconfiguring Express's `trust proxy` setting allow attackers to bypass rate limits?
 - **Status**: Self-study review (Recorded model answer).
 - **Model Answer**:
-  > When an application runs behind a reverse proxy (e.g. AWS ALB, Cloudflare, NGINX), the incoming TCP connection to Node.js originates from the reverse proxy's internal private IP. The proxy records the original client's IP in the `X-Forwarded-For` header:
-  > `X-Forwarded-For: <client_ip>, <proxy_1_ip>, <proxy_2_ip>`.
+  > When an application runs behind a reverse proxy (e.g. AWS ALB, Cloudflare, Render), incoming connections originate from the proxy's IP. The proxy records client IPs in `X-Forwarded-For: <client_ip>, <proxy_ip>`.
   >
-  > If an engineer blindly enables `app.set('trust proxy', true)` without restriction, Express blindly trusts whatever client IP is passed in the header. An attacker can write a script that sends a fake header:
-  > `X-Forwarded-For: 198.51.100.1`, then `198.51.100.2`, etc.
-  > Express uses the spoofed IP for `req.ip`, giving the attacker a brand-new rate-limit bucket on every single request and completely bypassing the rate limiter!
-  >
-  > **Mitigation**: Configure `trust proxy` to trust only the exact number of verified proxy hops (e.g., `app.set('trust proxy', 1)` for a single cloud edge proxy) or specify the proxy subnet CIDR.
+  > If an engineer blindly enables `app.set('trust proxy', true)` without restriction, Express trusts whatever IP is supplied. An attacker can spoof `X-Forwarded-For: 1.2.3.4`, cycling through fake IPs to bypass rate limits entirely. Configuring `trust proxy: 1` ensures Express only trusts the single verified edge proxy hop.
 
 ---
 
@@ -236,11 +226,9 @@ This document records the interview questions asked at the end of each phase, yo
 - **Question**: Why is SHA-256 appropriate for hashing high-entropy management tokens, whereas passwords must use slow adaptive algorithms like bcrypt or Argon2id?
 - **Status**: Self-study review (Recorded model answer).
 - **Model Answer**:
-  > Humans choose predictable, low-entropy passwords with small search spaces (e.g. 6–12 characters, often dictionary words). Without slow adaptive hashing (like bcrypt, PBKDF2, or Argon2id with work factors calibrated to ~100ms), an attacker with modern GPU cracking rigs can calculate billions of SHA-256 hashes per second to guess user passwords in minutes.
+  > Humans choose predictable, low-entropy passwords with small search spaces. Without slow adaptive hashing (like bcrypt, PBKDF2, or Argon2id with work factors calibrated to ~100ms), attackers using GPU cracking rigs can calculate billions of SHA-256 hashes per second to guess user passwords in minutes.
   >
   > In contrast, our management tokens are generated with 192 bits of cryptographic randomness (`crypto.randomBytes(24)`). There are $2^{192} \approx 6.27 \times 10^{57}$ possible combinations. It is mathematically impossible to brute-force a 192-bit random string through dictionary or offline attacks. Because entropy is already massive, a fast cryptographic hash like SHA-256 provides 100% security while saving valuable server CPU time.
-- **Follow-up 1**: Why hash the token at all if it's already an unguessable 192-bit string?
-  - **Answer**: Defense in depth. If our PostgreSQL database is breached, backed up insecurely, or dumped by a rogue insider, storing raw tokens would allow the attacker to manipulate, delete, or inspect analytics for all user links. Storing only one-way cryptographic hashes means the database leak contains zero usable tokens.
 
 ---
 
@@ -248,7 +236,7 @@ This document records the interview questions asked at the end of each phase, yo
 - **Question**: What is a side-channel timing attack, and how does `crypto.timingSafeEqual` protect token comparisons from it?
 - **Status**: Self-study review (Recorded model answer).
 - **Model Answer**:
-  > Standard string equality operators (`strA === strB`) implement early exit: they iterate character by character and stop at the very first mismatched byte. An attacker measuring the response time over thousands of requests can notice that a request matching the first byte takes 15 nanoseconds longer than a request with a wrong first byte. By repeating this process byte-by-byte, an attacker can reconstruct the entire secret hash.
+  > Standard string equality operators (`strA === strB`) implement early exit: they iterate character by character and stop at the very first mismatched byte. An attacker measuring response times over thousands of requests can notice that a request matching the first byte takes nanoseconds longer. By repeating this process byte-by-byte, an attacker can reconstruct the entire secret hash.
   >
   > `crypto.timingSafeEqual` performs an XOR comparison across all bytes in constant time regardless of where mismatches occur, preventing attackers from deriving any timing clues from server response times.
 
@@ -261,3 +249,40 @@ This document records the interview questions asked at the end of each phase, yo
   > CSP is an HTTP response header that defines which dynamic resources and origins are authorized to execute in the user's browser.
   >
   > The `'unsafe-inline'` directive allows JavaScript written inside `<script>...</script>` tags or inline HTML event handlers (`onload=...`, `onerror=...`) to execute. If an application allows inline scripts, any Cross-Site Scripting (XSS) vulnerability where user input is reflected into the HTML will immediately execute malicious JavaScript. Blocking `'unsafe-inline'` and restricting scripts strictly to `script-src 'self'` guarantees that even if an attacker manages to inject `<script>` into the DOM, modern browsers will refuse to execute it.
+
+---
+
+## Phase 7: Frontend Application
+
+### Question 1: DOM-Based XSS & Safe Rendering
+- **Question**: Why is using `innerHTML` with data received from a backend API considered a security risk, and how does `textContent` or `document.createElement` eliminate that risk?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > `element.innerHTML` causes the browser's HTML parser to parse the assigned string as executable markup. If any data returned from the backend (such as a destination URL, custom alias, or HTTP referrer string) contains malicious HTML tags like `<img src=x onerror=alert(document.cookie)>` or `<script>`, the browser will execute the injected script within the user's session (Cross-Site Scripting).
+  >
+  > Using `element.textContent` or creating elements via `document.createElement()` bypasses the HTML parser entirely. The browser treats the data strictly as raw, uninterpreted text glyphs, making script injection impossible regardless of the characters contained in the payload.
+- **Follow-up 1**: Does React protect against this by default?
+  - **Answer**: Yes! In React/JSX, expressions inside curly braces `{data}` are automatically escaped as text. To render raw HTML, React forces developers to explicitly write `dangerouslySetInnerHTML`, alerting the team to the security risk during code review.
+
+---
+
+### Question 2: CSP Enforcement with Frontend Scripts
+- **Question**: How does our Content-Security-Policy (CSP) interact with the frontend, and what happens if a script tag is placed directly into `index.html`?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > Our Helmet configuration enforces `script-src 'self'`. This directive instructs the browser to download and execute JavaScript files ONLY from our exact same origin (`<script src="/app.js"></script>`).
+  >
+  > If an inline `<script>console.log("hello")</script>` block is placed into `index.html`, the browser detects a violation of the CSP policy and blocks the script from executing, throwing a red error in the browser console: `Refused to execute inline script because it violates the following Content Security Policy directive...`. This defense-in-depth ensures that even if an attacker injects HTML into the page, their inline scripts are neutralized.
+
+---
+
+### Question 3: Pure SVG Charts vs Heavy Charting Libraries
+- **Question**: Why did we choose to render the analytics bar chart using pure mathematical SVG instead of installing an external charting library? What are the trade-offs?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > Installing third-party libraries (e.g. Chart.js, Recharts, D3) adds hundreds of kilobytes of external JavaScript, creates supply-chain dependencies that require periodic vulnerability patching, and increases page load times. By rendering an `<svg>` bar chart using pure mathematical scaling in vanilla JavaScript:
+  > 1. Total frontend bundle size remains under 10 KB.
+  > 2. Zero npm client dependencies to audit or maintain.
+  > 3. Clean demonstration of fundamental DOM and SVG manipulation in technical interviews.
+  >
+  > **Trade-off**: For complex dashboards requiring interactive zooming, multi-axis overlays, or 3D animations, a specialized charting library is more productive and maintainable than writing manual SVG math.

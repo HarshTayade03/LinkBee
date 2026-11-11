@@ -42,3 +42,4 @@ module.exports = {
   redis: redisClient,
   isReady: () => isRedisReady && redisClient && redisClient.status === 'ready',
 };
+
