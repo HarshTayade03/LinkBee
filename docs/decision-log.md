@@ -1,0 +1,11 @@
+# Architectural Decision Log (ADR)
+
+This file tracks all significant architectural, technical, and security decisions made during the project lifecycle.
+
+| ID | Phase | Decision | Alternatives Considered | Why We Chose This | Trade-off / Drawback |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **ADR-001** | Phase 0 | Clean separation of API service (`/api/v1`) from Redirection handler (`/:code`) | Single monolithic route handler | Separates hot redirection read path from colder management CRUD; allows independent caching, middleware, and rate limits. | Slight duplication of routing definitions; requires explicit route precedence in Express to avoid colliding with reserved prefixes. |
+| **ADR-002** | Phase 0 | Ephemeral management token model (hashed with SHA-256) instead of full Auth/User system | Full JWT/OAuth2 user session & account system | Keeps scope focused on backend engineering and systems fundamentals without boilerplate user registration/login tables. | Users cannot recover access to manage links if they lose their one-time management token. |
+| **ADR-003** | Phase 0 | PostgreSQL over MongoDB or SQLite | MongoDB (NoSQL document store), SQLite | Relational integrity, ACID compliance, native indexes, and support for high-throughput transactional writes with explicit schemas. | Slightly higher initial setup cost and resource overhead than SQLite. |
+| **ADR-004** | Phase 0 | Redis for Cache-Aside and Atomic Fixed-Window Rate Limiting | Memcached, in-memory Node process cache | Native atomicity (`INCR`), key expiration (`EXPIRE`), and decoupled shared state across multiple Node instances. | Added infrastructure dependency; application must handle fallback if Redis is unavailable. |
+| **ADR-005** | Phase 0 | 302 Found (Temporary Redirect) over 301 Moved Permanently | 301 Moved Permanently | Browsers aggressively cache 301 redirects locally, bypassing the backend on subsequent clicks, which prevents accurate real-time click analytics. | Marginal latency overhead on repeat visits since clients must re-query server instead of using local browser cache. |
