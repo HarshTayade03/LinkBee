@@ -96,3 +96,47 @@ This document records the interview questions asked at the end of each phase, yo
   - **Answer**: $62^7 \approx 3.52 \times 10^{12}$ combinations. By the Birthday Paradox, we would need to generate over 2 million URLs before the probability of even a single collision reaches $0.1\%$.
 - **Follow-up 2**: Why not do a `SELECT WHERE short_code = $1` before the `INSERT` instead of relying on the database error?
   - **Answer**: Checking before inserting introduces a **Time-of-Check to Time-of-Use (TOCTOU)** race condition. If two requests check at the exact same millisecond, both will see that the code is free and both will attempt to insert it. The database `UNIQUE` constraint is the only authoritative source of truth in a concurrent system.
+
+---
+
+## Phase 2: Correctness and Robustness
+
+### Question 1: Scheme Whitelisting vs Blacklisting
+- **Question**: Why is scheme whitelisting (`['http:', 'https:']`) fundamentally safer than blacklisting known malicious schemes like `javascript:`?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > Blacklisting relies on enumerating every dangerous input, which is fundamentally fragile because the list of dangerous or novel URI schemes is vast and platform-dependent (e.g. `javascript:`, `vbscript:`, `data:`, `file:`, `blob:`, `about:`, `chrome:`). Attackers constantly discover bypasses or edge-case encodings that slip past blacklist filters.
+  >
+  > **Whitelisting** (positive security model) defines the exact, small set of permitted behaviors (`['http:', 'https:']`) and rejects everything else by default. If a new malicious URI scheme or obscure browser quirk emerges tomorrow, our server automatically rejects it without needing code changes.
+- **Follow-up 1**: What if a user wants to shorten an `ftp:` or `mailto:` link?
+  - **Answer**: In a public web shortener, the primary use case is web navigation. Permitting non-HTTP schemes introduces security risks (like triggering local mail clients or FTP exploits). If business requirements genuinely demand supporting `mailto:`, it should be added explicitly to the whitelist with strict email format validation, never by disabling the whitelist.
+- **Follow-up 2**: How does the WHATWG URL standard parser help prevent validation bypasses?
+  - **Answer**: Hand-rolled regular expressions often fail to handle edge cases like mixed-case schemes (`JaVaScRiPt:`), whitespace, or leading control characters. Using Node's native `new URL()` parser ensures input is parsed according to standard browser URL normalization rules before validation checks occur.
+
+---
+
+### Question 2: HTTP 404 (Not Found) vs HTTP 410 (Gone)
+- **Question**: What is the semantic difference between HTTP `404 Not Found` and HTTP `410 Gone`, and why does using `410` matter for web crawlers and API consumers?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > `404 Not Found` means the server has not found anything matching the Request-URI, with no indication of whether the condition is temporary or permanent. Clients, web search engine crawlers (Googlebot), and proxies assume the resource might appear later, so they will continue to re-request and re-index the URL periodically.
+  >
+  > `410 Gone` explicitly signals that the target resource was intentionally removed or expired, and the condition is **permanent**. Search engines immediately de-index 410 URLs from search results, web crawlers stop wasting crawl budget hitting the server, and API clients know not to retry the request.
+- **Follow-up 1**: How does this impact database design for expired links?
+  - **Answer**: It requires us to keep tombstone records or timestamps for recently expired links rather than immediately running a hard `DELETE`. If we hard-deleted expired links instantly, our server wouldn't know if a code never existed or if it expired, forcing us to return a generic 404.
+- **Follow-up 2**: When should expired records be permanently deleted (purged)?
+  - **Answer**: Through an asynchronous background cron/maintenance worker that soft-deletes or archives records older than a retention window (e.g. 30–90 days after expiration) to reclaim database storage while maintaining the 410 guarantee during the active expiration window.
+
+---
+
+### Question 3: Server-Side Request Forgery (SSRF) and Cloud Metadata
+- **Question**: What is Server-Side Request Forgery (SSRF), and why is blocking IP `169.254.169.254` critical when deploying applications to AWS, GCP, or Azure?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > SSRF is an attack where an attacker induces a backend server to make HTTP requests to an unintended, internal destination that is not accessible from the public internet.
+  >
+  > In public cloud providers (AWS EC2, Google Cloud Engine, Azure VMs), the IP address `169.254.169.254` is the link-local **Instance Metadata Service (IMDS)**. When an internal application requests `http://169.254.169.254/latest/meta-data/iam/security-credentials/`, the cloud hypervisor returns the virtual machine's temporary IAM security credentials, private keys, and environment variables. If a URL shortener (or a link preview generator) fetches or redirects to this address without filtering, an attacker can steal the cloud role credentials and take over the entire cloud infrastructure.
+- **Follow-up 1**: Does blocking only string `"169.254.169.254"` completely protect against SSRF?
+  - **Answer**: Not by itself! Sophisticated attackers use DNS Rebinding, octal/hex IP representations (e.g., `0x7f000001` for `127.0.0.1`), IPv6 representations (`[::1]`), or custom domains that resolve to private IPs (`10.0.0.0/8`, `192.168.0.0/16`). Complete SSRF protection in production requires resolving the DNS hostname before fetching and verifying that the resolved IP does not fall within RFC 1918 private CIDR ranges.
+- **Follow-up 2**: What is IMDSv2 and how does AWS defend against SSRF at the cloud level?
+  - **Answer**: AWS introduced IMDSv2, which requires session-oriented requests with a `PUT` request to retrieve a secret token before querying metadata, and sets an IP hop limit (TTL = 1) on network packets. Since open redirects or SSRF GET requests cannot send custom `PUT` headers across network hops, IMDSv2 blocks metadata theft even if application-level checks fail.
