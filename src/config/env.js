@@ -6,6 +6,7 @@ const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   baseUrl: process.env.BASE_URL || 'http://localhost:3000',
   databaseUrl: process.env.DATABASE_URL,
+  redisUrl: process.env.REDIS_URL || 'redis://localhost:6380',
 };
 
 if (!config.databaseUrl) {
@@ -14,4 +15,3 @@ if (!config.databaseUrl) {
 }
 
 module.exports = config;
-

@@ -140,3 +140,44 @@ This document records the interview questions asked at the end of each phase, yo
   - **Answer**: Not by itself! Sophisticated attackers use DNS Rebinding, octal/hex IP representations (e.g., `0x7f000001` for `127.0.0.1`), IPv6 representations (`[::1]`), or custom domains that resolve to private IPs (`10.0.0.0/8`, `192.168.0.0/16`). Complete SSRF protection in production requires resolving the DNS hostname before fetching and verifying that the resolved IP does not fall within RFC 1918 private CIDR ranges.
 - **Follow-up 2**: What is IMDSv2 and how does AWS defend against SSRF at the cloud level?
   - **Answer**: AWS introduced IMDSv2, which requires session-oriented requests with a `PUT` request to retrieve a secret token before querying metadata, and sets an IP hop limit (TTL = 1) on network packets. Since open redirects or SSRF GET requests cannot send custom `PUT` headers across network hops, IMDSv2 blocks metadata theft even if application-level checks fail.
+
+---
+
+## Phase 3: Caching with Redis
+
+### Question 1: Cache-Aside vs Write-Through Caching
+- **Question**: What is the Cache-Aside pattern, and why is it preferred over Write-Through caching for a URL shortener?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > In **Cache-Aside (Lazy Loading)**, the application first checks the cache. On a hit, it returns immediately; on a miss, it queries the database, writes the result to the cache with a TTL, and returns. In **Write-Through**, every new link creation writes synchronously to both the database and the cache simultaneously.
+  >
+  > For a URL shortener, **Cache-Aside is vastly superior** because URL access distributions are heavily skewed (the 80/20 Pareto rule). Millions of shortened URLs are created that are clicked once or never clicked at all. Write-Through would saturate expensive Redis RAM with dormant links that consume memory without ever serving traffic. Cache-Aside ensures RAM is reserved exclusively for "hot" URLs that users actually visit.
+- **Follow-up 1**: What is the main drawback of Cache-Aside?
+  - **Answer**: A cache miss incurs a latency penalty (two network hops: cache read + database query + cache write), and concurrent requests for an un-cached link can cause a cache stampede.
+- **Follow-up 2**: How does Write-Behind (Write-Back) compare?
+  - **Answer**: Write-Behind writes directly to cache and asynchronously flushes to the database. While fast for writes, it risks permanent data loss if Redis crashes before dirty data is written to disk, making it unsuitable for persistent URL creation.
+
+---
+
+### Question 2: Thundering Herd (Cache Stampede)
+- **Question**: What is a "Thundering Herd" (Cache Stampede) problem, and how can backend engineers mitigate it on high-traffic viral links?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > A Cache Stampede occurs when a high-traffic cached key (e.g. a link with 10,000 clicks/sec) expires or is evicted. When the key vanishes, thousands of concurrent requests simultaneously experience a Cache Miss and all hammer the database at the exact same millisecond to rebuild the cache, saturating DB connections and causing CPU spikes or crashes.
+  >
+  > **Mitigations**:
+  > 1. **Distributed Mutex / Lock (`SET NX EX`)**: The first request to encounter the miss acquires a short lock in Redis to recompute the value; other requests wait briefly or retry.
+  > 2. **Probabilistic Early Expiration (XFetch algorithm)**: Background workers re-cache the value probabilistically *before* the TTL actually expires based on read frequency and computation time.
+  > 3. **Singleflight Pattern (Request Coalescing)**: In-process duplicate requests share the exact same promise/future, executing only one DB read for all waiting requests.
+- **Follow-up 1**: What is a simple operational defense against stampedes?
+  - **Answer**: Adding jitter to TTLs (e.g. $TTL \pm \text{random}(60s)$) so that multiple keys populated around the same time do not expire at the exact same second.
+
+---
+
+### Question 3: Redis Eviction Policies (`volatile-lru` vs `allkeys-lru`)
+- **Question**: What is the difference between Redis eviction policies `volatile-lru` and `allkeys-lru`, and why did we choose `allkeys-lru`?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > `volatile-lru` only evicts keys that have an explicit expiration (TTL) set when memory reaches the cap. If memory fills up with keys that lack a TTL, Redis stops accepting writes and throws `OOM command not allowed when used memory > 'maxmemory'`.
+  >
+  > `allkeys-lru` evicts the least recently used key across the **entire** key space, regardless of whether a TTL was set. We chose `allkeys-lru` because in our URL shortener, PostgreSQL is the permanent, durable system of record. Redis is treated strictly as an ephemeral accelerator. If memory is full, evicting any cold short-link is safe because it can always be re-fetched from PostgreSQL on demand.

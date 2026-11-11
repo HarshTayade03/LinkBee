@@ -13,6 +13,18 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./src/models/schema.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
+  redis:
+    image: redis:7-alpine
+    container_name: url_shortener_redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
