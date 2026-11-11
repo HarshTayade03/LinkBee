@@ -16,6 +16,10 @@ describe('URL Shortener - Click Analytics Test Suite', () => {
         resolve();
       });
     });
+
+    if (redis) {
+      await redis.del('rl:shorten:127.0.0.1');
+    }
   });
 
   after(async () => {
@@ -37,6 +41,7 @@ describe('URL Shortener - Click Analytics Test Suite', () => {
       body: JSON.stringify({ originalUrl: destination, customAlias: alias }),
     });
     assert.equal(createRes.status, 201);
+    const { managementToken } = (await createRes.json()).data;
 
     // 2. Click link 3 times with different referrers
     await fetch(`${baseUrl}/${alias}`, {
@@ -55,8 +60,10 @@ describe('URL Shortener - Click Analytics Test Suite', () => {
     // Brief wait for asynchronous fire-and-forget DB inserts to complete
     await new Promise((r) => setTimeout(r, 200));
 
-    // 3. Query GET /api/v1/stats/:code
-    const statsRes = await fetch(`${baseUrl}/api/v1/stats/${alias}`);
+    // 3. Query GET /api/v1/links/:code with management token
+    const statsRes = await fetch(`${baseUrl}/api/v1/links/${alias}`, {
+      headers: { 'X-Management-Token': managementToken },
+    });
     assert.equal(statsRes.status, 200);
     const json = await statsRes.json();
 
@@ -69,7 +76,9 @@ describe('URL Shortener - Click Analytics Test Suite', () => {
   });
 
   test('Querying stats for nonexistent code returns 404', async () => {
-    const statsRes = await fetch(`${baseUrl}/api/v1/stats/nonexistent-code-999`);
+    const statsRes = await fetch(`${baseUrl}/api/v1/links/nonexistent-code-999`, {
+      headers: { 'X-Management-Token': 'mgmt_dummy' },
+    });
     assert.equal(statsRes.status, 404);
     const json = await statsRes.json();
     assert.equal(json.error.code, 'URL_NOT_FOUND');

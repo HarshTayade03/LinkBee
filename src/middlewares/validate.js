@@ -21,6 +21,9 @@ const BLOCKED_HOSTNAMES = new Set([
   '::1',
   '169.254.169.254', // AWS/GCP instance metadata endpoint
   'metadata.google.internal',
+  'grabify.link',     // Known IP logger / malicious shortener
+  'iplogger.org',     // Known IP tracker
+  'malware-test.com', // Malicious test domain
 ]);
 
 /**

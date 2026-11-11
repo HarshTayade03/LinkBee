@@ -20,7 +20,7 @@ router.post('/shorten', shortenRateLimiter, validateShortenRequest, async (req, 
   try {
     const { originalUrl, customAlias, expiresAt } = req.body;
 
-    const record = await urlService.createShortUrl({
+    const { record, managementToken } = await urlService.createShortUrl({
       originalUrl,
       customAlias,
       expiresAt,
@@ -32,6 +32,7 @@ router.post('/shorten', shortenRateLimiter, validateShortenRequest, async (req, 
         shortCode: record.short_code,
         shortUrl: `${config.baseUrl}/${record.short_code}`,
         originalUrl: record.original_url,
+        managementToken, // Returned ONCE upon creation to the creator
         createdAt: record.created_at,
         expiresAt: record.expires_at,
       },
@@ -59,13 +60,13 @@ router.post('/shorten', shortenRateLimiter, validateShortenRequest, async (req, 
 });
 
 /**
- * GET /api/v1/stats/:code
- * Public stats endpoint for click analytics.
- * (In Phase 6, we will require the secret management token here)
+ * GET /api/v1/links/:code
+ * Protected stats & metadata endpoint: requires valid X-Management-Token header or ?token= query
  */
-router.get('/stats/:code', async (req, res) => {
+router.get('/links/:code', async (req, res) => {
   try {
     const { code } = req.params;
+    const token = req.get('X-Management-Token') || req.query.token;
 
     const { record, isExpired } = await urlService.getUrlByCode(code);
     if (!record) {
@@ -74,6 +75,17 @@ router.get('/stats/:code', async (req, res) => {
         error: {
           code: 'URL_NOT_FOUND',
           message: 'The requested short URL does not exist.',
+        },
+      });
+    }
+
+    // Authenticate using the per-link management token
+    if (!token || !urlService.verifyManagementToken(record, token)) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'A valid management token is required to view link analytics.',
         },
       });
     }
@@ -92,12 +104,60 @@ router.get('/stats/:code', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('Error fetching analytics:', err);
+    console.error('Error fetching link details:', err);
     return res.status(500).json({
       success: false,
       error: {
         code: 'INTERNAL_SERVER_ERROR',
-        message: 'An unexpected error occurred while fetching analytics.',
+        message: 'An unexpected error occurred.',
+      },
+    });
+  }
+});
+
+/**
+ * DELETE /api/v1/links/:code
+ * Delete short link: requires valid management token
+ */
+router.delete('/links/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+    const token = req.get('X-Management-Token') || req.query.token;
+
+    const { record } = await urlService.getUrlByCode(code);
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'URL_NOT_FOUND',
+          message: 'The requested short URL does not exist.',
+        },
+      });
+    }
+
+    if (!token || !urlService.verifyManagementToken(record, token)) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'A valid management token is required to delete this link.',
+        },
+      });
+    }
+
+    await urlService.deleteUrlByCode(code);
+    // Invalidate Redis cache immediately
+    const cacheService = require('../services/cacheService');
+    await cacheService.deleteCachedUrl(code);
+
+    return res.status(204).send();
+  } catch (err) {
+    console.error('Error deleting link:', err);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An unexpected error occurred.',
       },
     });
   }

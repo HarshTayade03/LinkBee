@@ -1,9 +1,7 @@
 const db = require('../config/db');
 const { generateShortCode } = require('../utils/base62');
+const { generateManagementToken, hashManagementToken, constantTimeCompare } = require('../utils/token');
 
-/**
- * Custom error class for alias collision (HTTP 409 Conflict)
- */
 class AliasConflictError extends Error {
   constructor(alias) {
     super(`The custom alias '${alias}' is already in use.`);
@@ -13,43 +11,48 @@ class AliasConflictError extends Error {
 }
 
 /**
- * Shorten a URL with optional custom alias and expiration date.
- * If customAlias is provided, collision returns AliasConflictError (HTTP 409).
- * If random code is generated, collision retries up to 3 times before failing.
+ * Shorten a URL with optional custom alias, expiration, and secret management token.
+ * Returns record and the raw management token (shown only once).
  */
 async function createShortUrl({ originalUrl, customAlias = null, expiresAt = null }) {
-  // If user requested a custom alias, perform a single insert
+  const rawToken = generateManagementToken();
+  const tokenHash = hashManagementToken(rawToken);
+
   if (customAlias) {
     try {
       const query = `
-        INSERT INTO urls (short_code, original_url, expires_at)
-        VALUES ($1, $2, $3)
+        INSERT INTO urls (short_code, original_url, expires_at, mgmt_token_hash)
+        VALUES ($1, $2, $3, $4)
         RETURNING id, short_code, original_url, created_at, expires_at;
       `;
-      const result = await db.query(query, [customAlias, originalUrl, expiresAt]);
-      return result.rows[0];
+      const result = await db.query(query, [customAlias, originalUrl, expiresAt, tokenHash]);
+      return {
+        record: result.rows[0],
+        managementToken: rawToken,
+      };
     } catch (err) {
       if (err.code === '23505') {
-        // Unique violation on custom alias -> HTTP 409 Conflict
         throw new AliasConflictError(customAlias);
       }
       throw err;
     }
   }
 
-  // Otherwise, generate random code with automatic retry on collision
   const maxRetries = 3;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const shortCode = generateShortCode(7);
 
     try {
       const query = `
-        INSERT INTO urls (short_code, original_url, expires_at)
-        VALUES ($1, $2, $3)
+        INSERT INTO urls (short_code, original_url, expires_at, mgmt_token_hash)
+        VALUES ($1, $2, $3, $4)
         RETURNING id, short_code, original_url, created_at, expires_at;
       `;
-      const result = await db.query(query, [shortCode, originalUrl, expiresAt]);
-      return result.rows[0];
+      const result = await db.query(query, [shortCode, originalUrl, expiresAt, tokenHash]);
+      return {
+        record: result.rows[0],
+        managementToken: rawToken,
+      };
     } catch (err) {
       if (err.code === '23505' && attempt < maxRetries - 1) {
         continue;
@@ -63,11 +66,10 @@ async function createShortUrl({ originalUrl, customAlias = null, expiresAt = nul
 
 /**
  * Find the original destination URL by short code.
- * Returns record and an isExpired boolean flag.
  */
 async function getUrlByCode(shortCode) {
   const query = `
-    SELECT id, short_code, original_url, created_at, expires_at
+    SELECT id, short_code, original_url, created_at, expires_at, mgmt_token_hash
     FROM urls
     WHERE short_code = $1;
   `;
@@ -79,7 +81,6 @@ async function getUrlByCode(shortCode) {
 
   const record = result.rows[0];
 
-  // Check if link has passed its expiration timestamp
   if (record.expires_at) {
     const now = new Date();
     const expiry = new Date(record.expires_at);
@@ -91,8 +92,34 @@ async function getUrlByCode(shortCode) {
   return { record, isExpired: false };
 }
 
+/**
+ * Verify management token against the stored SHA-256 hash using constant-time comparison.
+ */
+function verifyManagementToken(record, providedToken) {
+  if (!record || !record.mgmt_token_hash || !providedToken) {
+    return false;
+  }
+  const providedHash = hashManagementToken(providedToken);
+  return constantTimeCompare(record.mgmt_token_hash, providedHash);
+}
+
+/**
+ * Delete short link and associated clicks (requires valid management token)
+ */
+async function deleteUrlByCode(shortCode) {
+  const query = `
+    DELETE FROM urls
+    WHERE short_code = $1
+    RETURNING id, short_code;
+  `;
+  const result = await db.query(query, [shortCode]);
+  return result.rows.length > 0;
+}
+
 module.exports = {
   createShortUrl,
   getUrlByCode,
+  verifyManagementToken,
+  deleteUrlByCode,
   AliasConflictError,
 };

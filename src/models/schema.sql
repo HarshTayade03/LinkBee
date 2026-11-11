@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS urls (
     id BIGSERIAL PRIMARY KEY,
     short_code VARCHAR(32) NOT NULL UNIQUE,
     original_url TEXT NOT NULL,
+    mgmt_token_hash CHAR(64) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NULL
 );

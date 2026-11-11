@@ -172,8 +172,6 @@ This document records the interview questions asked at the end of each phase, yo
 - **Model Answer**:
   > When querying analytics for a specific link (`WHERE url_id = $1 AND clicked_at >= NOW() - INTERVAL '30 days' ORDER BY date`), PostgreSQL can use a composite index `(url_id, clicked_at DESC)` to jump directly to the target URL's entries and scan them in pre-sorted chronological order in a single operation.
   >
-  > If we had two single-column indexes, PostgreSQL would have to perform a Bitmap Index Scan (scanning two separate B-trees and intersecting their bit arrays in memory) and then sort the results, which is significantly slower.
-  >
   > An **Index-Only Scan** occurs when all columns required by the query (`url_id` and `clicked_at`) are present directly inside the index tree itself. PostgreSQL retrieves the data without ever reading the main table heap (`Heap Fetches: 0`), resulting in sub-millisecond execution times.
 
 ---
@@ -229,3 +227,37 @@ This document records the interview questions asked at the end of each phase, yo
   > Express uses the spoofed IP for `req.ip`, giving the attacker a brand-new rate-limit bucket on every single request and completely bypassing the rate limiter!
   >
   > **Mitigation**: Configure `trust proxy` to trust only the exact number of verified proxy hops (e.g., `app.set('trust proxy', 1)` for a single cloud edge proxy) or specify the proxy subnet CIDR.
+
+---
+
+## Phase 6: Security Hardening
+
+### Question 1: SHA-256 vs Slow Password Hashing (bcrypt/Argon2id)
+- **Question**: Why is SHA-256 appropriate for hashing high-entropy management tokens, whereas passwords must use slow adaptive algorithms like bcrypt or Argon2id?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > Humans choose predictable, low-entropy passwords with small search spaces (e.g. 6–12 characters, often dictionary words). Without slow adaptive hashing (like bcrypt, PBKDF2, or Argon2id with work factors calibrated to ~100ms), an attacker with modern GPU cracking rigs can calculate billions of SHA-256 hashes per second to guess user passwords in minutes.
+  >
+  > In contrast, our management tokens are generated with 192 bits of cryptographic randomness (`crypto.randomBytes(24)`). There are $2^{192} \approx 6.27 \times 10^{57}$ possible combinations. It is mathematically impossible to brute-force a 192-bit random string through dictionary or offline attacks. Because entropy is already massive, a fast cryptographic hash like SHA-256 provides 100% security while saving valuable server CPU time.
+- **Follow-up 1**: Why hash the token at all if it's already an unguessable 192-bit string?
+  - **Answer**: Defense in depth. If our PostgreSQL database is breached, backed up insecurely, or dumped by a rogue insider, storing raw tokens would allow the attacker to manipulate, delete, or inspect analytics for all user links. Storing only one-way cryptographic hashes means the database leak contains zero usable tokens.
+
+---
+
+### Question 2: Side-Channel Timing Attacks
+- **Question**: What is a side-channel timing attack, and how does `crypto.timingSafeEqual` protect token comparisons from it?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > Standard string equality operators (`strA === strB`) implement early exit: they iterate character by character and stop at the very first mismatched byte. An attacker measuring the response time over thousands of requests can notice that a request matching the first byte takes 15 nanoseconds longer than a request with a wrong first byte. By repeating this process byte-by-byte, an attacker can reconstruct the entire secret hash.
+  >
+  > `crypto.timingSafeEqual` performs an XOR comparison across all bytes in constant time regardless of where mismatches occur, preventing attackers from deriving any timing clues from server response times.
+
+---
+
+### Question 3: Content-Security-Policy (CSP) & Inline Scripts
+- **Question**: What is a Content-Security-Policy (CSP), and why is blocking `'unsafe-inline'` scripts critical for preventing Cross-Site Scripting (XSS)?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > CSP is an HTTP response header that defines which dynamic resources and origins are authorized to execute in the user's browser.
+  >
+  > The `'unsafe-inline'` directive allows JavaScript written inside `<script>...</script>` tags or inline HTML event handlers (`onload=...`, `onerror=...`) to execute. If an application allows inline scripts, any Cross-Site Scripting (XSS) vulnerability where user input is reflected into the HTML will immediately execute malicious JavaScript. Blocking `'unsafe-inline'` and restricting scripts strictly to `script-src 'self'` guarantees that even if an attacker manages to inject `<script>` into the DOM, modern browsers will refuse to execute it.
