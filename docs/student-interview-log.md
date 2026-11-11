@@ -50,3 +50,4 @@ This document records the interview questions asked at the end of each phase, yo
   > Attackers use shorteners to bypass email spam filters and security scanners. If an attacker emails a direct link to `fake-paypal-login.com`, automated filters block it immediately based on domain reputation. If the attacker instead sends `our-trusted-service.com/xyz123`, the filter trusts our domain and delivers the email to the victim. The user trusts the link, clicks it, and our server redirects them to the malicious page.
   >
   > **Mitigation**: Strict URL scheme whitelisting (`http`/`https` only; reject `javascript:`, `data:`, `file:`), blocking loopback/internal IPs (SSRF), blocking self-domain redirect loops, and maintaining a domain blocklist.
+

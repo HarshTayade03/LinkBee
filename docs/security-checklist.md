@@ -37,3 +37,4 @@ Track our applied defenses across every phase. Verify each item prior to staging
 - [ ] Database user granted least-privilege permissions (no `DROP TABLE` or schema-altering privileges in runtime application role).
 - [ ] Automated dependency security audit (`npm audit`) passing in CI with zero high/critical vulnerabilities.
 - [ ] All packages pinned with an immutable lockfile (`package-lock.json`).
+

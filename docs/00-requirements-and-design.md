@@ -286,3 +286,4 @@ Here are 3 interview-style questions based on this phase:
 1. **Why do we choose HTTP 302 (Found) instead of HTTP 301 (Moved Permanently) for URL shorteners? What happens if you pick 301?**
 2. **If we expect 10,000 redirects per second, why can't a single standard relational database handle it directly, and how does the cache-aside pattern change the equation?**
 3. **What is an Open Redirect vulnerability in the context of a URL shortener, and why would an attacker use our service to carry out phishing attacks?**
+

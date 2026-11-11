@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: url_shortener_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shortener_user
+      POSTGRES_PASSWORD: shortener_pass
+      POSTGRES_DB: shortener_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./src/models/schema.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+volumes:
+  postgres_data:
+    driver: local
