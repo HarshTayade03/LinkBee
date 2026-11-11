@@ -51,3 +51,48 @@ This document records the interview questions asked at the end of each phase, yo
   >
   > **Mitigation**: Strict URL scheme whitelisting (`http`/`https` only; reject `javascript:`, `data:`, `file:`), blocking loopback/internal IPs (SSRF), blocking self-domain redirect loops, and maintaining a domain blocklist.
 
+---
+
+## Phase 1: Core — Shorten and Redirect
+
+### Question 1: Auto-Increment Base62 and Information Disclosure
+- **Question**: Why is using an auto-incrementing database ID converted to Base62 (`id=1 -> '1'`, `id=2 -> '2'`) considered an information disclosure vulnerability in a URL shortener?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > Sequential auto-increment IDs expose two major security and business vulnerabilities:
+  > 1. **Predictable Enumeration / Harvesting**: Anyone can write a simple script to iterate through consecutive IDs (`0000001`, `0000002`...) and discover every single URL stored in our database, including unlisted, private, or internal links that users shared expecting obscurity.
+  > 2. **Business Intelligence Leakage**: Competitors can shorten a link at 9:00 AM and another at 5:00 PM, subtract the IDs, and calculate our exact daily link generation volume and business growth rate.
+  >
+  > **Solution**: Using cryptographically secure random Base62 codes (e.g. 7 characters = $62^7 \approx 3.52\text{ trillion}$ combinations) makes sequential guessing mathematically infeasible.
+- **Follow-up 1**: Does Base62 encryption exist, or is Base62 merely an encoding?
+  - **Answer**: Base62 is strictly a reversible positional encoding (like Base64 or Hex), not encryption. It provides zero confidentiality by itself; security comes from the high entropy/randomness of the generated bits before encoding.
+- **Follow-up 2**: If an interviewer asks: *"What if we use Feistel ciphers or format-preserving encryption on the sequential ID to avoid collisions while preventing enumeration?"*
+  - **Answer**: That is a valid alternative! A pseudo-random permutation (like a small-domain Feistel cipher or Skip32) maps sequential IDs to pseudo-random numbers with zero collisions. However, it adds cryptographic complexity and key management overhead, whereas random generation + DB unique retry is simpler to reason about and operates with negligible collision rates.
+
+---
+
+### Question 2: PostgreSQL Connection Pooling (`pg.Pool`)
+- **Question**: What is a PostgreSQL Connection Pool (`pg.Pool`), and why is creating a new database connection for every incoming HTTP request considered a bad practice in Node.js?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > Establishing a new TCP connection to PostgreSQL requires a three-way TCP handshake, TLS negotiation (if encrypted), process forking or authentication in PostgreSQL, and backend memory allocation (typically several megabytes per backend process). Under high web traffic (e.g., 2,000 requests/sec), creating and tearing down connections per request causes massive latency overhead and exhausts PostgreSQL's connection limits (`FATAL: too many connections`).
+  >
+  > A **Connection Pool** maintains a warm set of active, reusable database connections (e.g., `max: 20`). Incoming HTTP requests borrow an idle connection from the pool, execute their query in milliseconds, and release it back to the pool immediately.
+- **Follow-up 1**: Why not set `max: 500` in the pool so every request has a dedicated connection?
+  - **Answer**: PostgreSQL uses a process-per-connection architecture. Excessive connections create CPU context-switching thrashing and RAM exhaustion. Keeping pool sizes small (e.g., 20–50 connections) actually yields higher aggregate throughput and lower p99 latency than hundreds of competing connections.
+- **Follow-up 2**: How do we handle connection pooling when scaling horizontally to 50 Node.js server instances?
+  - **Answer**: When many app instances multiply the total pool count ($50 \text{ instances} \times 20 = 1{,}000 \text{ connections}$), we introduce an external connection pooler like **PgBouncer** or Supabase Supavisor in front of PostgreSQL to multiplex thousands of client connections onto a small set of database backends.
+
+---
+
+### Question 3: Concurrency & Hash Collisions
+- **Question**: If two concurrent requests generate the exact same random short-code at the exact same millisecond, what happens in the database, and how does our application handle it without failing the user's request?
+- **Status**: Self-study review (Recorded model answer).
+- **Model Answer**:
+  > In the database, the `short_code` column has a `UNIQUE` constraint backed by a unique B-Tree index. PostgreSQL guarantees ACID transaction isolation. Whichever request commits first succeeds; the second concurrent insert violates the unique constraint and is rolled back, returning PostgreSQL error code `23505` (`unique_violation`).
+  >
+  > In our application layer (`urlService.js`), we wrap the insert in an automated retry loop. When error `23505` is caught, the app does not crash or return a 500 to the client; instead, it generates a fresh random 7-character Base62 code and retries the insert (up to 3 attempts), ensuring the user's request succeeds seamlessly.
+- **Follow-up 1**: What is the probability of a collision with 7 Base62 characters?
+  - **Answer**: $62^7 \approx 3.52 \times 10^{12}$ combinations. By the Birthday Paradox, we would need to generate over 2 million URLs before the probability of even a single collision reaches $0.1\%$.
+- **Follow-up 2**: Why not do a `SELECT WHERE short_code = $1` before the `INSERT` instead of relying on the database error?
+  - **Answer**: Checking before inserting introduces a **Time-of-Check to Time-of-Use (TOCTOU)** race condition. If two requests check at the exact same millisecond, both will see that the code is free and both will attempt to insert it. The database `UNIQUE` constraint is the only authoritative source of truth in a concurrent system.
