@@ -14,3 +14,4 @@ if (!config.databaseUrl) {
 }
 
 module.exports = config;
+

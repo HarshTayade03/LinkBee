@@ -181,3 +181,4 @@ Practice answering these 3 questions:
 
 ## 11. Go Deeper (Optional)
 - **Database Index Types**: We used a standard B-Tree index on `short_code`. Why B-Tree instead of Hash index in PostgreSQL? While Hash indexes can be slightly faster for exact match equality (`=`), B-Tree indexes in modern PostgreSQL are crash-safe, support sorting/range queries, and benefit from advanced deduplication optimizations.
+

@@ -8,7 +8,7 @@ Welcome! This study guide accompanies our production-grade URL Shortener. It is 
 | :--- | :--- | :--- | :--- |
 | **[00-requirements-and-design.md](00-requirements-and-design.md)** | **Phase 0: Requirements, Design & Threat Model** | Functional & non-functional requirements, API contracts, capacity estimation, initial data model, directory layout, and complete threat model. | Completed |
 | **[01-core-shorten-and-redirect.md](01-core-shorten-and-redirect.md)** | **Phase 1: Core - Shorten & Redirect** | PostgreSQL schema, Base62 vs UUID vs Random strings, 301 vs 302 redirects, Docker Compose setup. | Completed |
-| **[02-correctness-and-robustness.md](02-correctness-and-robustness.md)** | **Phase 2: Correctness & Robustness** | Input validation, SSRF/scheme blocking, custom aliases, link expiry, error handling standards, and automated testing. | Pending |
+| **[02-correctness-and-robustness.md](02-correctness-and-robustness.md)** | **Phase 2: Correctness & Robustness** | Input validation, SSRF/scheme blocking, custom aliases, link expiry, error handling standards, and automated testing. | Completed |
 | **[03-caching-with-redis.md](03-caching-with-redis.md)** | **Phase 3: Caching with Redis** | Cache-aside pattern, TTL policies, handling cache stampedes/failures gracefully, and latency impact. | Pending |
 | **[04-click-analytics.md](04-click-analytics.md)** | **Phase 4: Click Analytics** | Asynchronous fire-and-forget logging, indexing strategies (`EXPLAIN ANALYZE`), aggregation queries, and IP privacy. | Pending |
 | **[05-rate-limiting.md](05-rate-limiting.md)** | **Phase 5: Rate Limiting** | Redis atomic fixed-window limiter (`INCR` + `EXPIRE`), reverse proxy trust, and DDoS mitigation. | Pending |

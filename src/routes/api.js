@@ -2,26 +2,21 @@ const express = require('express');
 const router = express.Router();
 const urlService = require('../services/urlService');
 const config = require('../config/env');
+const { validateShortenRequest } = require('../middlewares/validate');
 
 /**
  * POST /api/v1/shorten
- * Body: { originalUrl: string }
+ * Body: { originalUrl: string, customAlias?: string, expiresAt?: string }
  */
-router.post('/shorten', async (req, res) => {
+router.post('/shorten', validateShortenRequest, async (req, res) => {
   try {
-    const { originalUrl } = req.body;
+    const { originalUrl, customAlias, expiresAt } = req.body;
 
-    if (!originalUrl || typeof originalUrl !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_INPUT',
-          message: 'originalUrl is required and must be a string.',
-        },
-      });
-    }
-
-    const record = await urlService.createShortUrl(originalUrl);
+    const record = await urlService.createShortUrl({
+      originalUrl,
+      customAlias,
+      expiresAt,
+    });
 
     return res.status(201).json({
       success: true,
@@ -30,11 +25,21 @@ router.post('/shorten', async (req, res) => {
         shortUrl: `${config.baseUrl}/${record.short_code}`,
         originalUrl: record.original_url,
         createdAt: record.created_at,
+        expiresAt: record.expires_at,
       },
     });
   } catch (err) {
+    if (err instanceof urlService.AliasConflictError) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: err.code,
+          message: err.message,
+        },
+      });
+    }
+
     console.error('Error shortening URL:', err);
-    // Generic error response avoids leaking database internals or stack traces
     return res.status(500).json({
       success: false,
       error: {

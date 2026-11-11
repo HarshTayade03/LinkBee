@@ -23,3 +23,4 @@ module.exports = {
   generateShortCode,
   BASE62_CHARS,
 };
+
