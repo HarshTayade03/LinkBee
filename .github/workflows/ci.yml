@@ -1,0 +1,71 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-and-test:
+    name: Build, Audit & Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: shortener_user
+          POSTGRES_PASSWORD: shortener_pass
+          POSTGRES_DB: shortener_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Security Audit (Dependencies)
+        run: npm audit --audit-level=high
+
+      - name: Install Root Dependencies
+        run: npm ci
+
+      - name: Build React Frontend Monorepo
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Initialize Database Schema
+        run: |
+          PGPASSWORD=shortener_pass psql -h localhost -p 5433 -U shortener_user -d shortener_db -f src/models/schema.sql
+
+      - name: Run Integration Tests
+        env:
+          DATABASE_URL: postgres://shortener_user:shortener_pass@localhost:5433/shortener_db
+          REDIS_URL: redis://localhost:6380
+          BASE_URL: http://localhost:3000
+          PORT: 3000
+        run: npm test
