@@ -23,6 +23,7 @@ Welcome! This study guide accompanies our production-grade URL Shortener. It is 
 
 ## Supporting Living Documents
 
+- **[student-interview-log.md](student-interview-log.md)**: Log of every question asked at the end of each phase, your submitted answers, evaluation feedback, and model answers.
 - **[decision-log.md](decision-log.md)**: Architectural Decision Records (ADRs) tracking every engineering choice, evaluated alternatives, and trade-offs.
 - **[security-checklist.md](security-checklist.md)**: Production deployment verification checklist covering transport, auth, data, network, and runtime security.
 - **[glossary.md](glossary.md)**: One-line concise definitions for core distributed systems, database, networking, and security concepts.
@@ -32,3 +33,4 @@ Welcome! This study guide accompanies our production-grade URL Shortener. It is 
 - **[failure-scenarios.md](failure-scenarios.md)**: Chaos engineering & resilience analysis (Redis failure, DB connection exhaustion, hash collisions).
 - **[security-qa.md](security-qa.md)**: Security-specific interview drill questions.
 - **[resume-bullets.md](resume-bullets.md)**: High-impact, benchmark-backed resume statements.
+
