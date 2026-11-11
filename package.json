@@ -13,6 +13,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "build:frontend": "npm run --prefix frontend build",
+    "dev:frontend": "npm run --prefix frontend dev",
     "test": "node tests/runAll.js"
   },
   "dependencies": {
@@ -23,5 +25,8 @@
     "ioredis": "^6.0.0",
     "pg": "^8.23.1",
     "pgvector": "^0.3.1"
+  },
+  "devDependencies": {
+    "autocannon": "^9.0.0"
   }
 }

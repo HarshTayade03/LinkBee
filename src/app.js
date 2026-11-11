@@ -44,9 +44,18 @@ if (process.env.TRUST_PROXY === 'true') {
 // 4. Request body size limiting (10kb maximum to block payload bomb DoS)
 app.use(express.json({ limit: '10kb' }));
 
-// 5. Serve static frontend assets from /public directory
+// 5. Serve static frontend assets from /frontend/dist (or fallback to /public)
 const path = require('path');
-app.use(express.static(path.join(__dirname, '../public')));
+const fs = require('fs');
+
+const reactDistPath = path.join(__dirname, '../frontend/dist');
+const publicPath = path.join(__dirname, '../public');
+
+if (fs.existsSync(reactDistPath)) {
+  app.use(express.static(reactDistPath));
+} else {
+  app.use(express.static(publicPath));
+}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
