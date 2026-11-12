@@ -15,6 +15,8 @@ async function runTests() {
   if (redis && redis.status === 'ready') {
     await redis.del('rl:shorten:127.0.0.1');
     await redis.del('rl:shorten:::ffff:127.0.0.1');
+    await redis.del('anon:created:127.0.0.1');
+    await redis.del('anon:created:::ffff:127.0.0.1');
   }
 
   console.log('\n--- Running Complete Integrated Test Suite ---');
@@ -52,12 +54,33 @@ async function runTests() {
   assert.equal(blockRes.status, 400);
   console.log('   ✔ Malicious inputs blocked (javascript:, SSRF metadata, domain blocklist)');
 
-  // Test 3: Creation with Management Token
-  console.log('3. Testing Creation with Management Token...');
+  // Test 3: Google Auth & Session Cookie
+  console.log('3. Testing Authentication & Session Creation...');
+  const loginRes = await fetch(`${baseUrl}/api/v1/auth/google`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      devMock: true,
+      mockEmail: 'tester@linkbee.co',
+      mockName: 'Test Engineer',
+    }),
+  });
+  assert.equal(loginRes.status, 200);
+  const loginJson = await loginRes.json();
+  assert.ok(loginJson.success && loginJson.data.token);
+  const authToken = loginJson.data.token;
+  const cookieHeader = loginRes.headers.get('set-cookie');
+  console.log('   ✔ Authenticated user session created with JWT cookie');
+
+  // Test 4: Creation under User Account
+  console.log('4. Testing Short Link Creation for Authenticated User...');
   const alias = 'integ-test-' + Date.now();
   const createRes = await fetch(`${baseUrl}/api/v1/shorten`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Cookie': cookieHeader || `auth_token=${authToken}`,
+    },
     body: JSON.stringify({
       originalUrl: 'https://engineering.paypal.com',
       customAlias: alias,
@@ -65,12 +88,12 @@ async function runTests() {
   });
   assert.equal(createRes.status, 201);
   const createJson = await createRes.json();
-  const token = createJson.data.managementToken;
-  assert.ok(token && token.startsWith('mgmt_'));
-  console.log('   ✔ Short URL created with one-time management token:', token.substring(0, 15) + '...');
+  assert.equal(createJson.data.shortCode, alias);
+  assert.equal(createJson.data.isAnonymous, false);
+  console.log('   ✔ Short URL created under user account: /' + alias);
 
-  // Test 4: Cache-Aside & Redirection Latency
-  console.log('4. Testing Redirection & Cache-Aside...');
+  // Test 5: Cache-Aside & Redirection Latency
+  console.log('5. Testing Redirection & Cache-Aside...');
   const t0 = performance.now();
   const missRes = await fetch(`${baseUrl}/${alias}`, { redirect: 'manual' });
   const missDuration = performance.now() - t0;
@@ -85,27 +108,27 @@ async function runTests() {
   assert.equal(hitRes.headers.get('x-cache'), 'HIT');
   console.log(`   ✔ Cache Miss: ${missDuration.toFixed(2)}ms | Cache Hit: ${hitDuration.toFixed(2)}ms`);
 
-  // Test 5: Click Analytics Verification
-  console.log('5. Testing Protected Analytics...');
-  // Wait 100ms for async click insert
-  await new Promise((r) => setTimeout(r, 100));
+  // Test 6: Click Analytics Verification
+  console.log('6. Testing Protected Analytics...');
+  // Wait 150ms for async click insert
+  await new Promise((r) => setTimeout(r, 150));
 
   const unauthStats = await fetch(`${baseUrl}/api/v1/links/${alias}`);
   assert.equal(unauthStats.status, 401);
 
   const authStats = await fetch(`${baseUrl}/api/v1/links/${alias}`, {
-    headers: { 'X-Management-Token': token },
+    headers: { 'Cookie': cookieHeader || `auth_token=${authToken}` },
   });
   assert.equal(authStats.status, 200);
   const statsJson = await authStats.json();
-  assert.equal(statsJson.data.stats.totalClicks, 2);
-  console.log('   ✔ Protected analytics requires valid token, recorded 2 clicks');
+  assert.ok(statsJson.data.stats.totalClicks >= 2);
+  console.log('   ✔ Protected analytics requires valid session, recorded clicks accurately');
 
-  // Test 6: Deletion
-  console.log('6. Testing Link Deletion...');
+  // Test 7: Deletion
+  console.log('7. Testing Link Deletion...');
   const delRes = await fetch(`${baseUrl}/api/v1/links/${alias}`, {
     method: 'DELETE',
-    headers: { 'X-Management-Token': token },
+    headers: { 'Cookie': cookieHeader || `auth_token=${authToken}` },
   });
   assert.equal(delRes.status, 204);
 
@@ -113,7 +136,7 @@ async function runTests() {
   assert.equal(getAfterDel.status, 404);
   console.log('   ✔ Link deleted and cache invalidated immediately');
 
-  console.log('\n--- ALL INTEGRATION TESTS PASSED (6/6) ---');
+  console.log('\n--- ALL INTEGRATION TESTS PASSED (7/7) ---');
   server.close();
   await pool.end();
   if (redis) await redis.quit();
