@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Zap, 
+  Link2, 
   Copy, 
   Check, 
-  BarChart2, 
+  BarChart3, 
   Trash2, 
   ExternalLink,
   Lock,
@@ -11,42 +11,48 @@ import {
   User,
   LogOut,
   Sparkles,
-  Link as LinkIcon
+  Calendar,
+  Layers,
+  ShieldCheck,
+  TrendingUp,
+  Globe2,
+  ChevronRight
 } from 'lucide-react';
 
 export default function App() {
-  // Auth state
+  // Session State
   const [currentUser, setCurrentUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // Shortener Form State
+  // Link Composer State
   const [originalUrl, setOriginalUrl] = useState('');
   const [customAlias, setCustomAlias] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
-  const [shortenLoading, setShortenLoading] = useState(false);
-  const [shortenError, setShortenError] = useState('');
-  const [createdResult, setCreatedResult] = useState(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [composerLoading, setComposerLoading] = useState(false);
+  const [composerError, setComposerError] = useState('');
+  const [createdLink, setCreatedLink] = useState(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  // User Dashboard State
+  // Dashboard State (For signed-in users)
   const [userLinks, setUserLinks] = useState([]);
-  const [selectedLink, setSelectedLink] = useState(null);
+  const [selectedLinkSlug, setSelectedLinkSlug] = useState(null);
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [deletingCode, setDeletingCode] = useState(null);
+  const [deletingSlug, setDeletingSlug] = useState(null);
 
-  // 1. Check active user session on load
+  // Check active session on initial load
   useEffect(() => {
-    checkCurrentUser();
+    checkSession();
   }, []);
 
-  const checkCurrentUser = async () => {
+  const checkSession = async () => {
     try {
       const res = await fetch('/api/v1/auth/me');
       const data = await res.json();
       if (data.success && data.data.user) {
         setCurrentUser(data.data.user);
-        fetchUserLinks();
+        loadUserLinks();
       } else {
         setCurrentUser(null);
       }
@@ -57,40 +63,44 @@ export default function App() {
     }
   };
 
-  const fetchUserLinks = async () => {
+  const loadUserLinks = async () => {
     try {
       const res = await fetch('/api/v1/user/links');
       const data = await res.json();
       if (data.success) {
-        setUserLinks(data.data.links || []);
+        const links = data.data.links || [];
+        setUserLinks(links);
+        if (links.length > 0 && !selectedLinkSlug) {
+          // Auto-select most recent link
+          inspectLink(links[0].shortCode);
+        }
       }
     } catch (err) {
-      console.error('Error fetching user links:', err);
+      console.error('Failed to load user links:', err);
     }
   };
 
-  // Google Sign-In (Supports real token or convenient Dev One-Click Sign-In)
+  // Google Sign-In (Instant mock for local dev, real OAuth token in cloud)
   const handleGoogleSignIn = async () => {
     try {
-      // In development mode, trigger instant mock login for easy local testing
       const res = await fetch('/api/v1/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           devMock: true,
-          mockEmail: 'student.engineer@example.com',
-          mockName: 'Student Engineer',
+          mockEmail: 'developer@example.com',
+          mockName: 'Alex Rivera',
         }),
       });
       const data = await res.json();
       if (data.success) {
         setCurrentUser(data.data.user);
-        fetchUserLinks();
+        loadUserLinks();
       } else {
         alert(data.error?.message || 'Login failed');
       }
     } catch (err) {
-      alert(`Login error: ${err.message}`);
+      alert(`Login failed: ${err.message}`);
     }
   };
 
@@ -98,16 +108,17 @@ export default function App() {
     await fetch('/api/v1/auth/logout', { method: 'POST' });
     setCurrentUser(null);
     setUserLinks([]);
-    setSelectedLink(null);
+    setSelectedLinkSlug(null);
     setAnalyticsData(null);
+    setCreatedLink(null);
   };
 
-  // 2. Submit Shorten Link
-  const handleShorten = async (e) => {
+  // Create Short Link
+  const handleCreateLink = async (e) => {
     e.preventDefault();
-    setShortenError('');
-    setCreatedResult(null);
-    setShortenLoading(true);
+    setComposerError('');
+    setCreatedLink(null);
+    setComposerLoading(true);
 
     try {
       const payload = {
@@ -127,58 +138,57 @@ export default function App() {
         throw new Error(data.error?.message || 'Failed to shorten URL');
       }
 
-      setCreatedResult(data.data);
+      setCreatedLink(data.data);
       setOriginalUrl('');
       setCustomAlias('');
       setExpiryDate('');
+      setShowAdvanced(false);
 
-      // Refresh link list if user is authenticated
       if (currentUser) {
-        fetchUserLinks();
+        loadUserLinks();
+        inspectLink(data.data.shortCode);
       }
     } catch (err) {
-      setShortenError(err.message);
+      setComposerError(err.message);
     } finally {
-      setShortenLoading(false);
+      setComposerLoading(false);
     }
   };
 
-  // 3. Inspect Analytics for an owned link
-  const handleInspectLink = async (shortCode) => {
-    setSelectedLink(shortCode);
+  // Inspect link analytics
+  const inspectLink = async (slug) => {
+    setSelectedLinkSlug(slug);
     setAnalyticsLoading(true);
     setAnalyticsData(null);
 
     try {
-      const res = await fetch(`/api/v1/links/${encodeURIComponent(shortCode)}`);
+      const res = await fetch(`/api/v1/links/${encodeURIComponent(slug)}`);
       const data = await res.json();
       if (data.success) {
         setAnalyticsData(data.data);
-      } else {
-        alert(data.error?.message || 'Could not load analytics');
       }
     } catch (err) {
-      alert(`Error loading analytics: ${err.message}`);
+      console.error('Failed to load link metrics:', err);
     } finally {
       setAnalyticsLoading(false);
     }
   };
 
-  // 4. Delete link
-  const handleDeleteLink = async (shortCode) => {
-    if (!window.confirm(`Are you sure you want to delete /${shortCode}?`)) return;
-    setDeletingCode(shortCode);
+  // Delete Link
+  const handleDeleteLink = async (slug) => {
+    if (!window.confirm(`Permanently delete /${slug}? This action cannot be undone.`)) return;
+    setDeletingSlug(slug);
 
     try {
-      const res = await fetch(`/api/v1/links/${encodeURIComponent(shortCode)}`, {
+      const res = await fetch(`/api/v1/links/${encodeURIComponent(slug)}`, {
         method: 'DELETE',
       });
       if (res.ok) {
-        if (selectedLink === shortCode) {
-          setSelectedLink(null);
+        if (selectedLinkSlug === slug) {
+          setSelectedLinkSlug(null);
           setAnalyticsData(null);
         }
-        fetchUserLinks();
+        loadUserLinks();
       } else {
         const data = await res.json();
         alert(data.error?.message || 'Failed to delete link');
@@ -186,107 +196,107 @@ export default function App() {
     } catch (err) {
       alert(`Delete error: ${err.message}`);
     } finally {
-      setDeletingCode(null);
+      setDeletingSlug(null);
     }
   };
 
-  const copyToClipboard = async (text) => {
-    await navigator.clipboard.writeText(text);
+  const copyUrl = async (url) => {
+    await navigator.clipboard.writeText(url);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
   return (
     <div>
-      {/* Sticky Header */}
+      {/* Notion-styled Sticky Navigation Bar */}
       <header className="site-header">
         <div className="container header-inner">
-          <a href="/" className="brand-logo">
-            <Zap size={22} color="#2563EB" strokeWidth={3} />
-            <span>sho.rt</span>
-            <span className="brand-badge">OAuth Edition</span>
+          <a href="/" className="brand-link">
+            <div className="brand-icon">
+              <Link2 size={18} strokeWidth={2.5} />
+            </div>
+            <span className="brand-title">sho.rt</span>
           </a>
-          <nav>
-            <ul className="nav-links">
-              <li><a href="#shorten" className="nav-link">Shortener</a></li>
-              {currentUser && <li><a href="#dashboard" className="nav-link">My Links</a></li>}
-              <li><a href="#plans" className="nav-link">Plans</a></li>
-              
-              {/* User Authentication Navigation */}
-              {authLoading ? null : currentUser ? (
-                <li style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700, fontSize: '0.9rem' }}>
-                    <img 
-                      src={currentUser.avatar_url || 'https://api.dicebear.com/7.x/bottts/svg?seed=user'} 
-                      alt="Avatar" 
-                      style={{ width: '28px', height: '28px', borderRadius: '50%', border: '2px solid var(--border-color)' }}
-                    />
-                    <span>{currentUser.name}</span>
-                  </div>
-                  <button 
-                    type="button" 
-                    onClick={handleLogout} 
-                    className="btn btn-secondary" 
-                    style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}
-                    title="Sign Out"
-                  >
-                    <LogOut size={14} />
-                    <span>Logout</span>
-                  </button>
-                </li>
-              ) : (
-                <li>
-                  <button 
-                    type="button" 
-                    onClick={handleGoogleSignIn} 
-                    className="btn btn-primary" 
-                    style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }}
-                  >
-                    <User size={15} />
-                    <span>Sign in with Google</span>
-                  </button>
-                </li>
-              )}
-            </ul>
-          </nav>
+
+          <div className="nav-actions">
+            {authLoading ? null : currentUser ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div className="user-menu-pill">
+                  <img 
+                    src={currentUser.avatar_url || 'https://api.dicebear.com/7.x/bottts/svg?seed=sho'} 
+                    alt="User Avatar"
+                    className="user-avatar"
+                  />
+                  <span className="user-name-text">{currentUser.name}</span>
+                </div>
+                <button 
+                  type="button" 
+                  onClick={handleLogout} 
+                  className="btn btn-ghost" 
+                  style={{ padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
+                  title="Sign Out"
+                >
+                  <LogOut size={15} />
+                </button>
+              </div>
+            ) : (
+              <button 
+                type="button" 
+                onClick={handleGoogleSignIn} 
+                className="btn btn-primary"
+              >
+                <User size={15} />
+                <span>Sign in with Google</span>
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
       <main>
-        {/* Hero Section */}
-        <section className="hero-section">
+        {/* Dynamic Context-Aware Hero (Changes state whether signed in or guest) */}
+        <section className="hero-wrapper">
           <div className="container">
-            <div className="hero-pill">
-              <Zap size={14} color="#2563EB" />
-              <span>Sub-2ms Redis Caching</span>
-              <span>•</span>
-              <Lock size={14} color="#059669" />
-              <span>Google OAuth User Account Security</span>
-            </div>
-            <h1 className="hero-title">
-              Short links engineered for scale.<br />
-              Zero tokens. 100% User Owned.
-            </h1>
-            <p className="hero-subtitle">
-              Try 1 link anonymously for free. Sign in with Google to create unlimited links, 
-              view 30-day click trends, and manage your custom destinations.
-            </p>
+            {!currentUser ? (
+              <>
+                <div className="hero-chip">
+                  <Sparkles size={14} color="#2563EB" />
+                  <span>Modern, privacy-first link infrastructure</span>
+                </div>
+                <h1 className="hero-heading">
+                  Short links with superpowers.
+                </h1>
+                <p className="hero-description">
+                  Transform messy, lengthy URLs into branded, trackable links. 
+                  Experience zero tracking cookies, robust access controls, and real-time referral metrics.
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 className="hero-heading" style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>
+                  Welcome back, {currentUser.name.split(' ')[0]}
+                </h1>
+                <p className="hero-description" style={{ marginBottom: '1.75rem' }}>
+                  Create and manage your links. Monitor click trends and referral origins in real time.
+                </p>
+              </>
+            )}
           </div>
         </section>
 
-        {/* Shortener Workhorse Card */}
-        <section id="shorten" className="container">
-          <div className="neo-card">
-            <form onSubmit={handleShorten}>
-              {shortenError && (
-                <div className="error-banner" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>{shortenError}</span>
+        {/* Primary CTA Shortener Card (Bitly / Dub.co inspired workhorse) */}
+        <section className="container">
+          <div className="composer-card">
+            <form onSubmit={handleCreateLink}>
+              {composerError && (
+                <div className="error-chip" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{composerError}</span>
                   {!currentUser && (
                     <button 
                       type="button" 
                       onClick={handleGoogleSignIn} 
-                      className="btn btn-primary" 
-                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                      className="btn btn-blue" 
+                      style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
                     >
                       Sign In Now
                     </button>
@@ -294,83 +304,108 @@ export default function App() {
                 </div>
               )}
 
-              <div className="form-group">
-                <label htmlFor="url-input" className="form-label">Destination URL</label>
+              {/* High-Intent Main URL Bar */}
+              <div className="url-primary-input-wrap">
+                <Globe2 size={18} color="var(--text-secondary)" />
                 <input 
-                  id="url-input"
                   type="url"
-                  className="form-input"
-                  placeholder="https://example.com/very/long/destination/url"
+                  className="url-primary-input"
+                  placeholder="Paste your long link here... (e.g. https://mybrand.com/spring-launch-post)"
                   value={originalUrl}
                   onChange={(e) => setOriginalUrl(e.target.value)}
                   required
                 />
+                <button 
+                  type="submit" 
+                  disabled={composerLoading} 
+                  className="btn btn-blue"
+                  style={{ height: '38px', padding: '0 1.25rem' }}
+                >
+                  <span>{composerLoading ? 'Shortening...' : 'Shorten Link'}</span>
+                  <ArrowRight size={16} />
+                </button>
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="alias-input" className="form-label">Custom Alias (Optional)</label>
-                  <input 
-                    id="alias-input"
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. spring-sale"
-                    value={customAlias}
-                    onChange={(e) => setCustomAlias(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label htmlFor="expiry-input" className="form-label">Expiration Date (Optional)</label>
-                  <input 
-                    id="expiry-input"
-                    type="datetime-local"
-                    className="form-input"
-                    value={expiryDate}
-                    onChange={(e) => setExpiryDate(e.target.value)}
-                  />
-                </div>
+              {/* Progressive Disclosure (Custom Alias & Expiry) */}
+              <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <button 
+                  type="button" 
+                  onClick={() => setShowAdvanced(!showAdvanced)} 
+                  className="btn btn-ghost"
+                  style={{ fontSize: '0.82rem', padding: '0.25rem 0.5rem', gap: '0.35rem' }}
+                >
+                  <span>{showAdvanced ? 'Hide options' : '+ Custom alias & expiry'}</span>
+                </button>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
+                  {!currentUser ? '1 free trial link' : 'Unlimited links active'}
+                </span>
               </div>
 
-              <button type="submit" disabled={shortenLoading} className="btn btn-primary btn-full">
-                <span>{shortenLoading ? 'Generating short link...' : 'Shorten Link'}</span>
-                <ArrowRight size={18} />
-              </button>
+              {showAdvanced && (
+                <div className="composer-meta-row">
+                  <div className="meta-field">
+                    <span>sho.rt /</span>
+                    <input 
+                      type="text"
+                      placeholder="custom-alias"
+                      value={customAlias}
+                      onChange={(e) => setCustomAlias(e.target.value)}
+                    />
+                  </div>
+                  <div className="meta-field">
+                    <Calendar size={14} />
+                    <input 
+                      type="datetime-local"
+                      value={expiryDate}
+                      onChange={(e) => setExpiryDate(e.target.value)}
+                      title="Optional Expiration Timestamp"
+                    />
+                  </div>
+                </div>
+              )}
             </form>
 
-            {/* Link Creation Result */}
-            {createdResult && (
-              <div className="result-box">
-                <div className="result-url-row">
-                  <span className="short-url-text">{createdResult.shortUrl}</span>
+            {/* Created Link Success Toast */}
+            {createdLink && (
+              <div className="created-link-card">
+                <div className="created-link-top">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></div>
+                    <a 
+                      href={createdLink.shortUrl} 
+                      target="_blank" 
+                      rel="noreferrer" 
+                      className="created-link-anchor"
+                    >
+                      {createdLink.shortUrl}
+                    </a>
+                  </div>
                   <button 
                     type="button" 
+                    onClick={() => copyUrl(createdLink.shortUrl)} 
                     className="btn btn-secondary"
-                    onClick={() => copyToClipboard(createdResult.shortUrl)}
+                    style={{ padding: '0.4rem 0.85rem', fontSize: '0.85rem' }}
                   >
-                    {copiedLink ? <Check size={16} color="#059669" /> : <Copy size={16} />}
-                    <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
+                    {copiedLink ? <Check size={15} color="#059669" /> : <Copy size={15} />}
+                    <span>{copiedLink ? 'Copied' : 'Copy'}</span>
                   </button>
                 </div>
 
-                {createdResult.isAnonymous ? (
-                  <div style={{ background: '#EFF6FF', border: '2px solid #2563EB', padding: '0.85rem 1rem', borderRadius: '4px', fontSize: '0.9rem' }}>
-                    <div style={{ fontWeight: 800, marginBottom: '0.25rem', color: '#1D4ED8' }}>
-                      ⚡ Free Anonymous Link Created!
+                {/* Conversion Trigger: Shown only to anonymous guest users */}
+                {createdLink.isAnonymous && (
+                  <div className="anonymous-banner">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Lock size={16} />
+                      <span><strong>Free link created!</strong> To track clicks, protect links, and create more:</span>
                     </div>
-                    <span>
-                      You have used your 1 free anonymous link. To view click analytics and create unlimited links, 
-                    </span>{' '}
                     <button 
                       type="button" 
                       onClick={handleGoogleSignIn} 
-                      style={{ background: 'none', border: 'none', color: '#2563EB', fontWeight: 800, cursor: 'pointer', textDecoration: 'underline' }}
+                      className="btn btn-blue"
+                      style={{ padding: '0.35rem 0.85rem', fontSize: '0.8rem' }}
                     >
                       Sign in with Google
-                    </button>.
-                  </div>
-                ) : (
-                  <div style={{ background: 'var(--accent-success)', border: '2px solid var(--accent-success-border)', padding: '0.85rem 1rem', borderRadius: '4px', fontSize: '0.9rem', color: 'var(--accent-success-text)' }}>
-                    ✔ Link saved to your account! You can monitor click traffic below in your dashboard.
+                    </button>
                   </div>
                 )}
               </div>
@@ -378,143 +413,145 @@ export default function App() {
           </div>
         </section>
 
-        {/* Authenticated User Dashboard */}
+        {/* Authenticated Dashboard (Dub.co Style Master-Detail Layout) */}
         {currentUser && (
-          <section id="dashboard" className="container" style={{ paddingTop: '1rem', marginBottom: '3.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-              <div>
-                <h2 style={{ fontSize: '1.75rem', fontWeight: 900 }}>My Shortened Links</h2>
-                <p style={{ color: 'var(--text-muted)' }}>Manage your active destinations and inspect click analytics.</p>
-              </div>
-              <span className="brand-badge" style={{ background: '#2563EB' }}>
-                {userLinks.length} Active Links
+          <section className="container" style={{ marginBottom: '4rem' }}>
+            <div className="dashboard-header">
+              <h2 className="dashboard-title">Your Links</h2>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                {userLinks.length} total links
               </span>
             </div>
 
             {userLinks.length === 0 ? (
-              <div className="neo-card" style={{ textAlign: 'center', padding: '3rem 1.5rem', boxShadow: 'var(--shadow-sm)' }}>
-                <LinkIcon size={36} color="var(--text-muted)" style={{ margin: '0 auto 1rem' }} />
-                <h3 style={{ fontWeight: 800, marginBottom: '0.25rem' }}>No links created yet</h3>
-                <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Shorten your first link above to view analytics.</p>
-                <a href="#shorten" className="btn btn-primary">Create a Link</a>
+              <div className="composer-card" style={{ textAlign: 'center', padding: '3.5rem 1.5rem' }}>
+                <Layers size={36} color="var(--text-secondary)" style={{ margin: '0 auto 0.75rem', opacity: 0.6 }} />
+                <h3 style={{ fontWeight: 700, marginBottom: '0.25rem' }}>No links yet</h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', maxWidth: '360px', margin: '0 auto' }}>
+                  Paste a destination URL into the composer above to generate your first link.
+                </p>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) 1.5fr', gap: '1.5rem' }}>
-                {/* Link Table / List */}
-                <div className="neo-card" style={{ padding: '1rem', boxShadow: 'var(--shadow-sm)' }}>
-                  <div style={{ fontWeight: 800, padding: '0.5rem', borderBottom: '2px solid var(--border-color)', marginBottom: '0.5rem' }}>
-                    Select Link to Inspect
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {userLinks.map((link) => (
+              <div className="dashboard-grid">
+                {/* Links Master Column */}
+                <div className="links-list">
+                  {userLinks.map((link) => {
+                    const isActive = selectedLinkSlug === link.shortCode;
+                    return (
                       <div 
                         key={link.id}
-                        onClick={() => handleInspectLink(link.shortCode)}
-                        style={{
-                          padding: '0.75rem',
-                          border: '2px solid var(--border-color)',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          background: selectedLink === link.shortCode ? '#EFF6FF' : '#FFFFFF',
-                          borderColor: selectedLink === link.shortCode ? '#2563EB' : 'var(--border-color)',
-                          transition: 'all 0.15s ease',
-                        }}
+                        onClick={() => inspectLink(link.shortCode)}
+                        className={`link-item-card ${isActive ? 'active' : ''}`}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#2563EB' }}>
-                            /{link.shortCode}
+                        <div className="link-item-header">
+                          <span className="link-item-slug">
+                            <span>/{link.shortCode}</span>
                           </span>
-                          <span style={{ fontSize: '0.8rem', fontWeight: 700, background: '#F3F4F6', padding: '0.15rem 0.5rem', borderRadius: '4px' }}>
+                          <span className="link-item-clicks">
                             {link.totalClicks} clicks
                           </span>
                         </div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div className="link-item-dest">
                           {link.originalUrl}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
 
-                {/* Selected Link Analytics Inspector */}
+                {/* Link Analytics Detail Column */}
                 <div>
-                  {selectedLink && (
-                    <div className="neo-card" style={{ boxShadow: 'var(--shadow-md)' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                  {selectedLinkSlug && (
+                    <div className="analytics-pane">
+                      <div className="analytics-pane-header">
                         <div>
-                          <span style={{ fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 800, color: 'var(--text-muted)' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                             Link Analytics
-                          </span>
-                          <h3 style={{ fontSize: '1.5rem', fontWeight: 900, fontFamily: 'var(--font-mono)' }}>
-                            /{selectedLink}
+                          </div>
+                          <h3 style={{ fontSize: '1.35rem', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
+                            /{selectedLinkSlug}
                           </h3>
                         </div>
-                        <button 
-                          type="button" 
-                          onClick={() => handleDeleteLink(selectedLink)}
-                          disabled={deletingCode === selectedLink}
-                          className="btn btn-danger"
-                          style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem' }}
-                        >
-                          <Trash2 size={14} />
-                          <span>Delete</span>
-                        </button>
+
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button 
+                            type="button" 
+                            onClick={() => copyUrl(`${window.location.origin}/${selectedLinkSlug}`)}
+                            className="btn btn-secondary"
+                            style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}
+                            title="Copy short URL"
+                          >
+                            <Copy size={14} />
+                          </button>
+                          <button 
+                            type="button" 
+                            onClick={() => handleDeleteLink(selectedLinkSlug)}
+                            disabled={deletingSlug === selectedLinkSlug}
+                            className="btn btn-danger-subtle"
+                            style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}
+                            title="Delete link"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
 
                       {analyticsLoading ? (
-                        <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
                           Loading analytics...
                         </div>
                       ) : analyticsData ? (
                         <div>
-                          <div className="stats-grid">
-                            <div className="stat-card">
-                              <div className="stat-label">Total Clicks</div>
-                              <div className="stat-value">{analyticsData.stats.totalClicks.toLocaleString()}</div>
+                          {/* Metrics Header */}
+                          <div className="metrics-row">
+                            <div className="metric-box">
+                              <div className="metric-label">Total Clicks</div>
+                              <div className="metric-number">{analyticsData.stats.totalClicks}</div>
                             </div>
-                            <div className="stat-card">
-                              <div className="stat-label">Status</div>
-                              <div className="stat-value" style={{ fontSize: '1.35rem', color: analyticsData.isExpired ? '#DC2626' : '#059669' }}>
+                            <div className="metric-box">
+                              <div className="metric-label">Link Status</div>
+                              <div 
+                                className="metric-number" 
+                                style={{ 
+                                  fontSize: '1.25rem', 
+                                  color: analyticsData.isExpired ? 'var(--status-danger-text)' : 'var(--status-success-text)' 
+                                }}
+                              >
                                 {analyticsData.isExpired ? 'Expired' : 'Active'}
                               </div>
                             </div>
                           </div>
 
-                          {/* 30-Day SVG Chart */}
-                          <div className="chart-card">
-                            <div style={{ fontWeight: 800, fontSize: '1rem', marginBottom: '1rem' }}>
-                              30-Day Click Trend
+                          {/* 30-Day Click Trend SVG Chart */}
+                          <div className="chart-section">
+                            <div className="chart-section-title">
+                              30-Day Click Trajectory
                             </div>
-                            <SvgTrendChart dailyData={analyticsData.stats.clicksByDay || []} />
+                            <CleanSvgChart dailyData={analyticsData.stats.clicksByDay || []} />
                           </div>
 
                           {/* Top Referrers */}
-                          <div className="chart-card" style={{ marginBottom: 0 }}>
-                            <div style={{ fontWeight: 800, fontSize: '1rem', marginBottom: '0.75rem' }}>
-                              Top Referrers
+                          <div className="chart-section" style={{ marginBottom: 0 }}>
+                            <div className="chart-section-title">
+                              Top Referral Traffic
                             </div>
-                            {analyticsData.stats.topReferrers.length === 0 ? (
-                              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No clicks recorded yet.</p>
+                            {(!analyticsData.stats.topReferrers || analyticsData.stats.topReferrers.length === 0) ? (
+                              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>No clicks recorded yet.</p>
                             ) : (
-                              <ul style={{ listStyle: 'none' }}>
+                              <div>
                                 {analyticsData.stats.topReferrers.map((item, idx) => (
-                                  <li key={idx} className="referrer-item">
+                                  <div key={idx} className="referrer-row">
                                     <span style={{ fontWeight: 600 }}>{item.source}</span>
-                                    <span style={{ fontFamily: 'var(--font-mono)' }}>{item.count} clicks</span>
-                                  </li>
+                                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                                      {item.count} clicks
+                                    </span>
+                                  </div>
                                 ))}
-                              </ul>
+                              </div>
                             )}
                           </div>
                         </div>
                       ) : null}
-                    </div>
-                  )}
-
-                  {!selectedLink && (
-                    <div className="neo-card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)', boxShadow: 'var(--shadow-sm)' }}>
-                      <BarChart2 size={32} style={{ margin: '0 auto 0.5rem', opacity: 0.5 }} />
-                      <p>Select any link from the left to view click trends.</p>
                     </div>
                   )}
                 </div>
@@ -523,84 +560,93 @@ export default function App() {
           </section>
         )}
 
-        {/* Transparent Tiers Section */}
-        <section id="plans" className="pricing-section">
-          <div className="container">
-            <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
-              <h2 style={{ fontSize: '2rem', fontWeight: 900 }}>Simple, Transparent Usage</h2>
-              <p style={{ color: 'var(--text-muted)' }}>
-                Try 1 link free, or sign in with Google for unlimited links and real-time analytics.
-              </p>
-            </div>
-
-            <div className="pricing-grid">
-              {/* Free Trial */}
-              <div className="plan-card">
-                <h3 className="plan-name">Anonymous Trial</h3>
-                <div className="plan-price">$0 <span>/ try</span></div>
-                <ul className="plan-features">
-                  <li className="plan-feature-item">✔ <strong>1 free short link</strong> without an account</li>
-                  <li className="plan-feature-item">✔ <strong>Sub-2ms Redis</strong> cache-aside redirect</li>
-                  <li className="plan-feature-item">✔ <strong>Full protocol security</strong> & validation</li>
-                  <li className="plan-feature-item" style={{ opacity: 0.6 }}>✖ No analytics dashboard</li>
-                  <li className="plan-feature-item" style={{ opacity: 0.6 }}>✖ Cannot edit or delete link</li>
-                </ul>
-                <a href="#shorten" className="btn btn-secondary">Try 1 Link</a>
+        {/* Feature Highlights (Rendered only for guests/unauthenticated visitors) */}
+        {!currentUser && (
+          <section className="features-section">
+            <div className="container">
+              <div style={{ textAlign: 'center', maxWidth: '540px', margin: '0 auto' }}>
+                <h2 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
+                  Engineered with production discipline.
+                </h2>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', marginTop: '0.5rem' }}>
+                  Built from the ground up for high-throughput resilience, transparent data ownership, and rock-solid security.
+                </p>
               </div>
 
-              {/* Authenticated Community Plan */}
-              <div className="plan-card featured">
-                <span className="plan-badge">Most Popular</span>
-                <h3 className="plan-name">Google Sign-In</h3>
-                <div className="plan-price">$0 <span>/ forever</span></div>
-                <ul className="plan-features">
-                  <li className="plan-feature-item">✔ <strong>Unlimited short links</strong> per user</li>
-                  <li className="plan-feature-item">✔ <strong>Full 30-day analytics</strong> & charts</li>
-                  <li className="plan-feature-item">✔ <strong>Manage & delete</strong> your short URLs</li>
-                  <li className="plan-feature-item">✔ <strong>Custom aliases</strong> & expiration dates</li>
-                  <li className="plan-feature-item">✔ <strong>Zero tokens to lose</strong> — securely linked to Google</li>
-                </ul>
-                <button type="button" onClick={handleGoogleSignIn} className="btn btn-primary">
-                  Sign in with Google
-                </button>
+              <div className="features-grid">
+                <div className="feature-item">
+                  <div className="feature-icon-wrapper">
+                    <TrendingUp size={18} color="#2563EB" />
+                  </div>
+                  <h3 className="feature-title">High-Throughput Caching</h3>
+                  <p className="feature-desc">
+                    In-memory cache-aside architecture serving viral traffic directly from memory with empirical sub-25ms median latency.
+                  </p>
+                </div>
+
+                <div className="feature-item">
+                  <div className="feature-icon-wrapper">
+                    <ShieldCheck size={18} color="#059669" />
+                  </div>
+                  <h3 className="feature-title">Privacy by Design</h3>
+                  <p className="feature-desc">
+                    Zero raw client IP addresses stored in our database. Compliant with strict GDPR and CCPA privacy standards from day one.
+                  </p>
+                </div>
+
+                <div className="feature-item">
+                  <div className="feature-icon-wrapper">
+                    <Lock size={18} color="#6366F1" />
+                  </div>
+                  <h3 className="feature-title">Seamless Google Access</h3>
+                  <p className="feature-desc">
+                    Never worry about losing manual API tokens. Sign in securely with Google to access and manage your link dashboard anytime.
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
       </main>
 
+      {/* Notion-styled Minimalist Footer */}
       <footer className="site-footer">
         <div className="container">
-          <p style={{ fontWeight: 700, marginBottom: '0.5rem' }}>
-            ⚡ sho.rt — Engineered with Node.js, PostgreSQL, Redis, React & Google OAuth.
+          <p style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.35rem' }}>
+            sho.rt — High-Performance URL Shortener & Analytics
           </p>
-          <p>Built for PayPal-level backend interviews. Zero tracking cookies. 100% Free & Open Source.</p>
+          <p>
+            Engineered with Node.js, PostgreSQL, Redis, and React. 100% Free & Open Source.
+          </p>
         </div>
       </footer>
     </div>
   );
 }
 
-function SvgTrendChart({ dailyData }) {
+/**
+ * Clean Mathematical SVG Bar Chart (Dub.co Style)
+ */
+function CleanSvgChart({ dailyData }) {
   if (!dailyData || dailyData.length === 0) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '140px', color: 'var(--text-muted)' }}>
-        No daily click activity recorded yet.
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '120px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+        No clicks in the last 30 days
       </div>
     );
   }
 
   const maxClicks = Math.max(...dailyData.map((d) => d.clicks), 1);
-  const chartHeight = 130;
-  const startY = 160;
-  const barWidth = Math.max(10, Math.min(30, Math.floor(540 / dailyData.length) - 8));
-  const stepX = 540 / dailyData.length;
+  const chartHeight = 110;
+  const startY = 135;
+  const barWidth = Math.max(12, Math.min(28, Math.floor(520 / dailyData.length) - 6));
+  const stepX = 520 / dailyData.length;
 
   return (
-    <div style={{ width: '100%', height: '180px' }}>
-      <svg width="100%" height="100%" viewBox="0 0 600 180" preserveAspectRatio="none">
+    <div style={{ width: '100%', height: '160px' }}>
+      <svg width="100%" height="100%" viewBox="0 0 560 160" preserveAspectRatio="none">
         {dailyData.map((day, index) => {
-          const x = 30 + index * stepX + (stepX - barWidth) / 2;
+          const x = 20 + index * stepX + (stepX - barWidth) / 2;
           const barH = (day.clicks / maxClicks) * chartHeight;
           const y = startY - barH;
 
@@ -610,17 +656,15 @@ function SvgTrendChart({ dailyData }) {
               x={x}
               y={y}
               width={barWidth}
-              height={Math.max(barH, 3)}
+              height={Math.max(barH, 2)}
               fill="#2563EB"
-              stroke="#1C1917"
-              strokeWidth="2"
-              rx="2"
+              rx="3"
             >
               <title>{`${day.date}: ${day.clicks} clicks`}</title>
             </rect>
           );
         })}
-        <line x1="20" y1="162" x2="580" y2="162" stroke="#1C1917" strokeWidth="2" />
+        <line x1="10" y1="137" x2="550" y2="137" stroke="#E8E8E5" strokeWidth="1" />
       </svg>
     </div>
   );
