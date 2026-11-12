@@ -13,7 +13,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "build:frontend": "npm run --prefix frontend build",
+    "install:all": "npm install && npm install --prefix frontend",
+    "build:frontend": "npm install --prefix frontend && npm run --prefix frontend build",
     "dev:frontend": "npm run --prefix frontend dev",
     "test": "node tests/runAll.js",
     "db:migrate": "node src/migrate.js"
