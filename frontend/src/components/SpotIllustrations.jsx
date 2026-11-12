@@ -85,3 +85,4 @@ export function ExpiredLinkSpot({ size = 80 }) {
     </svg>
   );
 }
+
