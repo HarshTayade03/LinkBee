@@ -90,3 +90,4 @@ When asked: *"Estimate the database storage and egress bandwidth required for Bi
 - Peak reads: 15,000 req/sec.
 - Egress Bandwidth = $15,000 \times 500\text{ bytes} = 7.5\text{ MB/sec} \approx \mathbf{60\text{ Mbps}}$.
 - Very modest bandwidth requirement, making CDN edge caching extremely cost-effective.
+

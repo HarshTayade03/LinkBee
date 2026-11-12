@@ -37,3 +37,4 @@ Place this concise elevator summary at the top of your GitHub repository `README
 - **Enterprise-Grade Security**: Defends against SSRF, loopback attacks, XSS, and race conditions via atomic Redis pipelines.
 - **Production Monorepo**: React + Vite frontend served seamlessly by Express with zero CORS overhead and Google OAuth multi-tenancy.
 ```
+

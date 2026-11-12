@@ -274,3 +274,4 @@ Under GDPR and CCPA, IP addresses are classified as Personal Identifiable Inform
 2. **X-Content-Type-Options: nosniff**: Prevents MIME-type sniffing attacks.
 3. **Strict-Transport-Security (HSTS)**: Forces browsers to communicate exclusively over HTTPS.
 4. **X-Frame-Options: DENY**: Prevents clickjacking by forbidding embedding the application in iframes.
+

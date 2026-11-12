@@ -39,3 +39,4 @@ On the security front:
 - **SSRF Prevention**: Malicious actors often try to use URL shorteners to probe internal microservices (`localhost`, `127.0.0.1`, `169.254.169.254` AWS metadata). Our input validator resolves the target domain's IP before inserting and strictly forbids private, loopback, and link-local ranges.
 - **Rate Limiting**: We enforce a sliding window rate limit using atomic Redis pipelines (`INCR` and `EXPIRE`), preventing distributed denial of service while informing clients with RFC-compliant headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`).
 - **Authentication**: We use Google OAuth 2.0 with JWT HTTP-only cookies, providing frictionless sign-in while protecting against Cross-Site Scripting (XSS) and CSRF attacks."
+

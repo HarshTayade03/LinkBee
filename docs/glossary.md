@@ -56,3 +56,4 @@ Mastering precise engineering terminology is critical for senior-level technical
 
 ### S
 - **SSRF (Server-Side Request Forgery)**: A vulnerability where an attacker induces a backend server to make unauthorized HTTP requests to internal, private infrastructure.
+

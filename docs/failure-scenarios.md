@@ -52,3 +52,4 @@ A senior engineer is evaluated not on whether their system works when conditions
 - **Our Implementation**:
   - Click tracking is offloaded to `setImmediate()`.
   - In our production scale recommendations (Phase 10/Scaling discussion), this is piped to a message broker (Kafka/SQS) with backpressure buffers, decoupling ingress throughput from persistence capacity.
+

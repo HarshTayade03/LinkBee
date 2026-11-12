@@ -57,3 +57,4 @@ Parameterized queries ensure the database driver sends the query template and th
 **Answer**:
 When comparing sensitive secrets (such as API keys or webhook HMAC signatures), standard string equality `a === b` terminates early on the first non-matching byte, leaking execution time to attackers.
 - To prevent this, we use `crypto.timingSafeEqual(bufferA, bufferB)`, ensuring the comparison takes identical execution time regardless of whether the match succeeds or fails.
+

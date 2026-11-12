@@ -129,3 +129,4 @@ If Upstash hits its daily limit or drops connection:
 | **Caching Layer** | Upstash Serverless Redis (single endpoint) | Redis Cluster with 3 master nodes and 3 replicas with sentinel failover |
 | **Analytics Processing** | In-process `setImmediate` async insert to PostgreSQL | Distributed event stream: Kafka or AWS Kinesis buffer -> Flink / ClickHouse / BigQuery OLAP store |
 | **Domain & CDN** | Default platform subdomain with Let's Encrypt | Enterprise Cloudflare / Akamai CDN with custom edge workers and WAF rules |
+

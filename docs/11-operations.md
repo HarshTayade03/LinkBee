@@ -117,3 +117,4 @@ If an abusive link is reported:
 | `DATABASE_URL` | On credential compromise | Disconnects current pool if changed without restart. | Rotate credentials in Neon dashboard, update Render environment variable, trigger zero-downtime rolling restart. |
 | `REDIS_URL` | On credential compromise | Temporary fallback to DB-only mode. | Update Render environment variable; app degrades cleanly until connected. |
 | `GOOGLE_CLIENT_SECRET` | 180 days | Prevents new OAuth sign-ins if outdated. | Generate secondary secret in Google Cloud Console, update env, verify, delete old secret. |
+
