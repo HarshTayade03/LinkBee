@@ -1,7 +1,9 @@
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const apiRoutes = require('./routes/api');
+const authRoutes = require('./routes/auth');
 const redirectRoutes = require('./routes/redirect');
 const config = require('./config/env');
 
@@ -13,25 +15,27 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"], // Enforce NO inline scripts
-        styleSrc: ["'self'", "'unsafe-inline'"], // Allow styles for simple components
-        imgSrc: ["'self'", "data:"],
-        connectSrc: ["'self'"],
+        scriptSrc: ["'self'", "https://accounts.google.com"], // Allow Google OAuth script
+        frameSrc: ["'self'", "https://accounts.google.com"],  // Allow Google One Tap iframe
+        styleSrc: ["'self'", "'unsafe-inline'", "https://accounts.google.com"],
+        imgSrc: ["'self'", "data:", "https://*.googleusercontent.com", "https://api.dicebear.com"],
+        connectSrc: ["'self'", "https://accounts.google.com"],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
       },
     },
     crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' }, // Required for Google Sign-In popup
   })
 );
 
-// 2. Strict CORS Configuration (locked to exact allowed origin, no wildcards)
+// 2. Strict CORS Configuration
 app.use(
   cors({
     origin: process.env.ALLOWED_ORIGIN || config.baseUrl,
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'X-Management-Token'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   })
 );
@@ -41,8 +45,9 @@ if (process.env.TRUST_PROXY === 'true') {
   app.set('trust proxy', 1);
 }
 
-// 4. Request body size limiting (10kb maximum to block payload bomb DoS)
+// 4. Request body size limiting & cookie parsing
 app.use(express.json({ limit: '10kb' }));
+app.use(cookieParser());
 
 // 5. Serve static frontend assets from /frontend/dist (or fallback to /public)
 const path = require('path');
@@ -62,10 +67,9 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', uptime: process.uptime() });
 });
 
-// Mount API routes under /api/v1
+// Mount Routes
+app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1', apiRoutes);
-
-// Mount redirect routes directly on root (e.g., GET /:code)
 app.use('/', redirectRoutes);
 
 // 404 handler for unmatched routes

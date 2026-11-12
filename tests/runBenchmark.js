@@ -73,3 +73,4 @@ runBenchmark().catch((err) => {
   console.error('Benchmark execution error:', err);
   process.exit(1);
 });
+

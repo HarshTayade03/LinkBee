@@ -1,6 +1,5 @@
 const db = require('../config/db');
 const { generateShortCode } = require('../utils/base62');
-const { generateManagementToken, hashManagementToken, constantTimeCompare } = require('../utils/token');
 
 class AliasConflictError extends Error {
   constructor(alias) {
@@ -11,25 +10,20 @@ class AliasConflictError extends Error {
 }
 
 /**
- * Shorten a URL with optional custom alias, expiration, and secret management token.
- * Returns record and the raw management token (shown only once).
+ * Shorten a URL.
+ * If userId is provided, associate the URL with the authenticated user account.
+ * If userId is null, link is created anonymously (anonymous free trial).
  */
-async function createShortUrl({ originalUrl, customAlias = null, expiresAt = null }) {
-  const rawToken = generateManagementToken();
-  const tokenHash = hashManagementToken(rawToken);
-
+async function createShortUrl({ originalUrl, customAlias = null, expiresAt = null, userId = null }) {
   if (customAlias) {
     try {
       const query = `
-        INSERT INTO urls (short_code, original_url, expires_at, mgmt_token_hash)
+        INSERT INTO urls (short_code, original_url, expires_at, user_id)
         VALUES ($1, $2, $3, $4)
-        RETURNING id, short_code, original_url, created_at, expires_at;
+        RETURNING id, short_code, original_url, created_at, expires_at, user_id;
       `;
-      const result = await db.query(query, [customAlias, originalUrl, expiresAt, tokenHash]);
-      return {
-        record: result.rows[0],
-        managementToken: rawToken,
-      };
+      const result = await db.query(query, [customAlias, originalUrl, expiresAt, userId]);
+      return result.rows[0];
     } catch (err) {
       if (err.code === '23505') {
         throw new AliasConflictError(customAlias);
@@ -44,15 +38,12 @@ async function createShortUrl({ originalUrl, customAlias = null, expiresAt = nul
 
     try {
       const query = `
-        INSERT INTO urls (short_code, original_url, expires_at, mgmt_token_hash)
+        INSERT INTO urls (short_code, original_url, expires_at, user_id)
         VALUES ($1, $2, $3, $4)
-        RETURNING id, short_code, original_url, created_at, expires_at;
+        RETURNING id, short_code, original_url, created_at, expires_at, user_id;
       `;
-      const result = await db.query(query, [shortCode, originalUrl, expiresAt, tokenHash]);
-      return {
-        record: result.rows[0],
-        managementToken: rawToken,
-      };
+      const result = await db.query(query, [shortCode, originalUrl, expiresAt, userId]);
+      return result.rows[0];
     } catch (err) {
       if (err.code === '23505' && attempt < maxRetries - 1) {
         continue;
@@ -69,7 +60,7 @@ async function createShortUrl({ originalUrl, customAlias = null, expiresAt = nul
  */
 async function getUrlByCode(shortCode) {
   const query = `
-    SELECT id, short_code, original_url, created_at, expires_at, mgmt_token_hash
+    SELECT id, short_code, original_url, created_at, expires_at, user_id
     FROM urls
     WHERE short_code = $1;
   `;
@@ -93,33 +84,39 @@ async function getUrlByCode(shortCode) {
 }
 
 /**
- * Verify management token against the stored SHA-256 hash using constant-time comparison.
+ * Fetch all links owned by a specific authenticated user.
  */
-function verifyManagementToken(record, providedToken) {
-  if (!record || !record.mgmt_token_hash || !providedToken) {
-    return false;
-  }
-  const providedHash = hashManagementToken(providedToken);
-  return constantTimeCompare(record.mgmt_token_hash, providedHash);
+async function getUserLinks(userId) {
+  const query = `
+    SELECT u.id, u.short_code, u.original_url, u.created_at, u.expires_at,
+           COUNT(c.id)::int AS total_clicks
+    FROM urls u
+    LEFT JOIN clicks c ON c.url_id = u.id
+    WHERE u.user_id = $1
+    GROUP BY u.id
+    ORDER BY u.created_at DESC;
+  `;
+  const result = await db.query(query, [userId]);
+  return result.rows;
 }
 
 /**
- * Delete short link and associated clicks (requires valid management token)
+ * Delete a short link only if owned by the requesting user.
  */
-async function deleteUrlByCode(shortCode) {
+async function deleteUserUrl(shortCode, userId) {
   const query = `
     DELETE FROM urls
-    WHERE short_code = $1
+    WHERE short_code = $1 AND user_id = $2
     RETURNING id, short_code;
   `;
-  const result = await db.query(query, [shortCode]);
+  const result = await db.query(query, [shortCode, userId]);
   return result.rows.length > 0;
 }
 
 module.exports = {
   createShortUrl,
   getUrlByCode,
-  verifyManagementToken,
-  deleteUrlByCode,
+  getUserLinks,
+  deleteUserUrl,
   AliasConflictError,
 };

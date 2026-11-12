@@ -1,42 +1,113 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Zap, 
   Copy, 
   Check, 
-  AlertTriangle, 
   BarChart2, 
   Trash2, 
   ExternalLink,
   Lock,
-  Clock,
-  ArrowRight
+  ArrowRight,
+  User,
+  LogOut,
+  Sparkles,
+  Link as LinkIcon
 } from 'lucide-react';
 
 export default function App() {
+  // Auth state
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   // Shortener Form State
   const [originalUrl, setOriginalUrl] = useState('');
   const [customAlias, setCustomAlias] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [shortenLoading, setShortenLoading] = useState(false);
   const [shortenError, setShortenError] = useState('');
   const [createdResult, setCreatedResult] = useState(null);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [copiedToken, setCopiedToken] = useState(false);
 
-  // Analytics Inspector State
-  const [statsCode, setStatsCode] = useState('');
-  const [statsToken, setStatsToken] = useState('');
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [statsError, setStatsError] = useState('');
+  // User Dashboard State
+  const [userLinks, setUserLinks] = useState([]);
+  const [selectedLink, setSelectedLink] = useState(null);
   const [analyticsData, setAnalyticsData] = useState(null);
-  const [deleting, setDeleting] = useState(false);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [deletingCode, setDeletingCode] = useState(null);
 
-  // 1. Submit Shorten URL
+  // 1. Check active user session on load
+  useEffect(() => {
+    checkCurrentUser();
+  }, []);
+
+  const checkCurrentUser = async () => {
+    try {
+      const res = await fetch('/api/v1/auth/me');
+      const data = await res.json();
+      if (data.success && data.data.user) {
+        setCurrentUser(data.data.user);
+        fetchUserLinks();
+      } else {
+        setCurrentUser(null);
+      }
+    } catch (e) {
+      setCurrentUser(null);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const fetchUserLinks = async () => {
+    try {
+      const res = await fetch('/api/v1/user/links');
+      const data = await res.json();
+      if (data.success) {
+        setUserLinks(data.data.links || []);
+      }
+    } catch (err) {
+      console.error('Error fetching user links:', err);
+    }
+  };
+
+  // Google Sign-In (Supports real token or convenient Dev One-Click Sign-In)
+  const handleGoogleSignIn = async () => {
+    try {
+      // In development mode, trigger instant mock login for easy local testing
+      const res = await fetch('/api/v1/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          devMock: true,
+          mockEmail: 'student.engineer@example.com',
+          mockName: 'Student Engineer',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCurrentUser(data.data.user);
+        fetchUserLinks();
+      } else {
+        alert(data.error?.message || 'Login failed');
+      }
+    } catch (err) {
+      alert(`Login error: ${err.message}`);
+    }
+  };
+
+  const handleLogout = async () => {
+    await fetch('/api/v1/auth/logout', { method: 'POST' });
+    setCurrentUser(null);
+    setUserLinks([]);
+    setSelectedLink(null);
+    setAnalyticsData(null);
+  };
+
+  // 2. Submit Shorten Link
   const handleShorten = async (e) => {
     e.preventDefault();
     setShortenError('');
     setCreatedResult(null);
-    setLoading(true);
+    setShortenLoading(true);
 
     try {
       const payload = {
@@ -57,111 +128,125 @@ export default function App() {
       }
 
       setCreatedResult(data.data);
-      // Pre-populate stats fields for convenience
-      setStatsCode(data.data.shortCode);
-      setStatsToken(data.data.managementToken);
+      setOriginalUrl('');
+      setCustomAlias('');
+      setExpiryDate('');
+
+      // Refresh link list if user is authenticated
+      if (currentUser) {
+        fetchUserLinks();
+      }
     } catch (err) {
       setShortenError(err.message);
     } finally {
-      setLoading(false);
+      setShortenLoading(false);
     }
   };
 
-  // Copy Helpers
-  const copyToClipboard = async (text, isToken = false) => {
-    if (!text) return;
-    await navigator.clipboard.writeText(text);
-    if (isToken) {
-      setCopiedToken(true);
-      setTimeout(() => setCopiedToken(false), 2000);
-    } else {
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2000);
-    }
-  };
-
-  // 2. Inspect Analytics
-  const handleInspectStats = async (e) => {
-    e.preventDefault();
-    setStatsError('');
+  // 3. Inspect Analytics for an owned link
+  const handleInspectLink = async (shortCode) => {
+    setSelectedLink(shortCode);
+    setAnalyticsLoading(true);
     setAnalyticsData(null);
-    setStatsLoading(true);
 
     try {
-      const res = await fetch(`/api/v1/links/${encodeURIComponent(statsCode.trim())}`, {
-        headers: {
-          'X-Management-Token': statsToken.trim(),
-        },
-      });
-
+      const res = await fetch(`/api/v1/links/${encodeURIComponent(shortCode)}`);
       const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error?.message || 'Failed to fetch analytics');
+      if (data.success) {
+        setAnalyticsData(data.data);
+      } else {
+        alert(data.error?.message || 'Could not load analytics');
       }
-
-      setAnalyticsData(data.data);
     } catch (err) {
-      setStatsError(err.message);
+      alert(`Error loading analytics: ${err.message}`);
     } finally {
-      setStatsLoading(false);
+      setAnalyticsLoading(false);
     }
   };
 
-  // 3. Delete Link
-  const handleDeleteLink = async () => {
-    if (!statsCode || !statsToken) return;
-    const confirm = window.confirm(`Permanently delete short link '${statsCode}'? This cannot be undone.`);
-    if (!confirm) return;
+  // 4. Delete link
+  const handleDeleteLink = async (shortCode) => {
+    if (!window.confirm(`Are you sure you want to delete /${shortCode}?`)) return;
+    setDeletingCode(shortCode);
 
-    setDeleting(true);
     try {
-      const res = await fetch(`/api/v1/links/${encodeURIComponent(statsCode.trim())}`, {
+      const res = await fetch(`/api/v1/links/${encodeURIComponent(shortCode)}`, {
         method: 'DELETE',
-        headers: { 'X-Management-Token': statsToken.trim() },
       });
-
-      if (!res.ok) {
+      if (res.ok) {
+        if (selectedLink === shortCode) {
+          setSelectedLink(null);
+          setAnalyticsData(null);
+        }
+        fetchUserLinks();
+      } else {
         const data = await res.json();
-        throw new Error(data.error?.message || 'Failed to delete link');
+        alert(data.error?.message || 'Failed to delete link');
       }
-
-      alert(`Link '${statsCode}' was successfully deleted.`);
-      setAnalyticsData(null);
-      setStatsCode('');
-      setStatsToken('');
     } catch (err) {
-      alert(`Deletion error: ${err.message}`);
+      alert(`Delete error: ${err.message}`);
     } finally {
-      setDeleting(false);
+      setDeletingCode(null);
     }
+  };
+
+  const copyToClipboard = async (text) => {
+    await navigator.clipboard.writeText(text);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
   };
 
   return (
     <div>
       {/* Sticky Header */}
-      <header class="site-header">
-        <div class="container header-inner">
-          <a href="/" class="brand-logo">
+      <header className="site-header">
+        <div className="container header-inner">
+          <a href="/" className="brand-logo">
             <Zap size={22} color="#2563EB" strokeWidth={3} />
             <span>sho.rt</span>
-            <span class="brand-badge">React Monorepo</span>
+            <span className="brand-badge">OAuth Edition</span>
           </a>
           <nav>
-            <ul class="nav-links">
-              <li><a href="#shorten" class="nav-link">Shortener</a></li>
-              <li><a href="#analytics" class="nav-link">Analytics</a></li>
-              <li><a href="#plans" class="nav-link">Plans</a></li>
-              <li>
-                <a 
-                  href="https://github.com" 
-                  target="_blank" 
-                  rel="noreferrer" 
-                  class="nav-link"
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                >
-                  GitHub <ExternalLink size={14} />
-                </a>
-              </li>
+            <ul className="nav-links">
+              <li><a href="#shorten" className="nav-link">Shortener</a></li>
+              {currentUser && <li><a href="#dashboard" className="nav-link">My Links</a></li>}
+              <li><a href="#plans" className="nav-link">Plans</a></li>
+              
+              {/* User Authentication Navigation */}
+              {authLoading ? null : currentUser ? (
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700, fontSize: '0.9rem' }}>
+                    <img 
+                      src={currentUser.avatar_url || 'https://api.dicebear.com/7.x/bottts/svg?seed=user'} 
+                      alt="Avatar" 
+                      style={{ width: '28px', height: '28px', borderRadius: '50%', border: '2px solid var(--border-color)' }}
+                    />
+                    <span>{currentUser.name}</span>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={handleLogout} 
+                    className="btn btn-secondary" 
+                    style={{ padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}
+                    title="Sign Out"
+                  >
+                    <LogOut size={14} />
+                    <span>Logout</span>
+                  </button>
+                </li>
+              ) : (
+                <li>
+                  <button 
+                    type="button" 
+                    onClick={handleGoogleSignIn} 
+                    className="btn btn-primary" 
+                    style={{ padding: '0.45rem 1rem', fontSize: '0.85rem' }}
+                  >
+                    <User size={15} />
+                    <span>Sign in with Google</span>
+                  </button>
+                </li>
+              )}
             </ul>
           </nav>
         </div>
@@ -169,277 +254,314 @@ export default function App() {
 
       <main>
         {/* Hero Section */}
-        <section class="hero-section">
-          <div class="container">
-            <div class="hero-pill">
+        <section className="hero-section">
+          <div className="container">
+            <div className="hero-pill">
               <Zap size={14} color="#2563EB" />
               <span>Sub-2ms Redis Caching</span>
               <span>•</span>
               <Lock size={14} color="#059669" />
-              <span>Zero IP Tracking</span>
+              <span>Google OAuth User Account Security</span>
             </div>
-            <h1 class="hero-title">
-              Links that don't look like spam.<br />
-              Analytics that don't spy.
+            <h1 className="hero-title">
+              Short links engineered for scale.<br />
+              Zero tokens. 100% User Owned.
             </h1>
-            <p class="hero-subtitle">
-              Engineered with Node.js, PostgreSQL, Redis, and React. Cache-aside hot path, 
-              asynchronous click analytics, and per-link 192-bit cryptographic tokens.
+            <p className="hero-subtitle">
+              Try 1 link anonymously for free. Sign in with Google to create unlimited links, 
+              view 30-day click trends, and manage your custom destinations.
             </p>
           </div>
         </section>
 
         {/* Shortener Workhorse Card */}
-        <section id="shorten" class="container">
-          <div class="neo-card">
+        <section id="shorten" className="container">
+          <div className="neo-card">
             <form onSubmit={handleShorten}>
               {shortenError && (
-                <div class="error-banner" role="alert">
-                  {shortenError}
+                <div className="error-banner" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{shortenError}</span>
+                  {!currentUser && (
+                    <button 
+                      type="button" 
+                      onClick={handleGoogleSignIn} 
+                      className="btn btn-primary" 
+                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                    >
+                      Sign In Now
+                    </button>
+                  )}
                 </div>
               )}
 
-              <div class="form-group">
-                <label htmlFor="url-input" class="form-label">Destination URL</label>
+              <div className="form-group">
+                <label htmlFor="url-input" className="form-label">Destination URL</label>
                 <input 
                   id="url-input"
                   type="url"
-                  class="form-input"
-                  placeholder="https://example.com/long-article-path-to-shorten"
+                  className="form-input"
+                  placeholder="https://example.com/very/long/destination/url"
                   value={originalUrl}
                   onChange={(e) => setOriginalUrl(e.target.value)}
                   required
                 />
               </div>
 
-              <div class="form-row">
-                <div class="form-group">
-                  <label htmlFor="alias-input" class="form-label">Custom Alias (Optional)</label>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="alias-input" className="form-label">Custom Alias (Optional)</label>
                   <input 
                     id="alias-input"
                     type="text"
-                    class="form-input"
-                    placeholder="e.g. launch-2026"
+                    className="form-input"
+                    placeholder="e.g. spring-sale"
                     value={customAlias}
                     onChange={(e) => setCustomAlias(e.target.value)}
                   />
                 </div>
-                <div class="form-group">
-                  <label htmlFor="expiry-input" class="form-label">Expiration Date (Optional)</label>
+                <div className="form-group">
+                  <label htmlFor="expiry-input" className="form-label">Expiration Date (Optional)</label>
                   <input 
                     id="expiry-input"
                     type="datetime-local"
-                    class="form-input"
+                    className="form-input"
                     value={expiryDate}
                     onChange={(e) => setExpiryDate(e.target.value)}
                   />
                 </div>
               </div>
 
-              <button type="submit" disabled={loading} class="btn btn-primary btn-full">
-                <span>{loading ? 'Creating short link...' : 'Shorten Link'}</span>
+              <button type="submit" disabled={shortenLoading} className="btn btn-primary btn-full">
+                <span>{shortenLoading ? 'Generating short link...' : 'Shorten Link'}</span>
                 <ArrowRight size={18} />
               </button>
             </form>
 
-            {/* Success Result Drawer */}
+            {/* Link Creation Result */}
             {createdResult && (
-              <div class="result-box">
-                <div class="result-url-row">
-                  <span class="short-url-text">{createdResult.shortUrl}</span>
+              <div className="result-box">
+                <div className="result-url-row">
+                  <span className="short-url-text">{createdResult.shortUrl}</span>
                   <button 
                     type="button" 
-                    class="btn btn-secondary"
-                    onClick={() => copyToClipboard(createdResult.shortUrl, false)}
+                    className="btn btn-secondary"
+                    onClick={() => copyToClipboard(createdResult.shortUrl)}
                   >
                     {copiedLink ? <Check size={16} color="#059669" /> : <Copy size={16} />}
                     <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
                   </button>
                 </div>
 
-                <div class="token-alert">
-                  <div class="token-alert-header">
-                    <AlertTriangle size={18} />
-                    <span>One-Time Management Token (Save this!)</span>
-                  </div>
-                  <p style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-                    This secret token is generated with 192 bits of entropy and shown <strong>once</strong>. 
-                    We store only its SHA-256 hash. You need it to view stats or delete this link.
-                  </p>
-                  <div class="token-display">
-                    <span>{createdResult.managementToken}</span>
+                {createdResult.isAnonymous ? (
+                  <div style={{ background: '#EFF6FF', border: '2px solid #2563EB', padding: '0.85rem 1rem', borderRadius: '4px', fontSize: '0.9rem' }}>
+                    <div style={{ fontWeight: 800, marginBottom: '0.25rem', color: '#1D4ED8' }}>
+                      ⚡ Free Anonymous Link Created!
+                    </div>
+                    <span>
+                      You have used your 1 free anonymous link. To view click analytics and create unlimited links, 
+                    </span>{' '}
                     <button 
                       type="button" 
-                      class="btn btn-secondary"
-                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.85rem' }}
-                      onClick={() => copyToClipboard(createdResult.managementToken, true)}
+                      onClick={handleGoogleSignIn} 
+                      style={{ background: 'none', border: 'none', color: '#2563EB', fontWeight: 800, cursor: 'pointer', textDecoration: 'underline' }}
                     >
-                      {copiedToken ? <Check size={14} color="#059669" /> : <Copy size={14} />}
-                      <span>{copiedToken ? 'Copied!' : 'Copy Token'}</span>
-                    </button>
+                      Sign in with Google
+                    </button>.
                   </div>
-                </div>
+                ) : (
+                  <div style={{ background: 'var(--accent-success)', border: '2px solid var(--accent-success-border)', padding: '0.85rem 1rem', borderRadius: '4px', fontSize: '0.9rem', color: 'var(--accent-success-text)' }}>
+                    ✔ Link saved to your account! You can monitor click traffic below in your dashboard.
+                  </div>
+                )}
               </div>
             )}
           </div>
         </section>
 
-        {/* Analytics Inspector Section */}
-        <section id="analytics" class="container" style={{ paddingTop: '2rem' }}>
-          <div style={{ marginBottom: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>Link Analytics Inspector</h2>
-            <p style={{ color: 'var(--text-muted)' }}>
-              Inspect real-time engagement and top referrers using your link's secret management token.
-            </p>
-          </div>
-
-          <div class="neo-card" style={{ boxShadow: 'var(--shadow-md)' }}>
-            <form onSubmit={handleInspectStats}>
-              {statsError && <div class="error-banner">{statsError}</div>}
-
-              <div class="form-row">
-                <div class="form-group">
-                  <label htmlFor="stats-code-input" class="form-label">Short Code or Custom Alias</label>
-                  <input 
-                    id="stats-code-input"
-                    type="text"
-                    class="form-input"
-                    placeholder="e.g. M2Igdd5 or launch-2026"
-                    value={statsCode}
-                    onChange={(e) => setStatsCode(e.target.value)}
-                    required
-                  />
-                </div>
-                <div class="form-group">
-                  <label htmlFor="stats-token-input" class="form-label">Management Token</label>
-                  <input 
-                    id="stats-token-input"
-                    type="text"
-                    class="form-input"
-                    placeholder="mgmt_..."
-                    value={statsToken}
-                    onChange={(e) => setStatsToken(e.target.value)}
-                    required
-                  />
-                </div>
+        {/* Authenticated User Dashboard */}
+        {currentUser && (
+          <section id="dashboard" className="container" style={{ paddingTop: '1rem', marginBottom: '3.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+              <div>
+                <h2 style={{ fontSize: '1.75rem', fontWeight: 900 }}>My Shortened Links</h2>
+                <p style={{ color: 'var(--text-muted)' }}>Manage your active destinations and inspect click analytics.</p>
               </div>
+              <span className="brand-badge" style={{ background: '#2563EB' }}>
+                {userLinks.length} Active Links
+              </span>
+            </div>
 
-              <button type="submit" disabled={statsLoading} class="btn btn-secondary">
-                <BarChart2 size={18} />
-                <span>{statsLoading ? 'Loading metrics...' : 'Inspect Analytics'}</span>
-              </button>
-            </form>
-
-            {/* Render Analytics Dashboard */}
-            {analyticsData && (
-              <div style={{ marginTop: '2rem' }}>
-                <div class="stats-grid">
-                  <div class="stat-card">
-                    <div class="stat-label">Total Clicks</div>
-                    <div class="stat-value">{analyticsData.stats.totalClicks.toLocaleString()}</div>
+            {userLinks.length === 0 ? (
+              <div className="neo-card" style={{ textAlign: 'center', padding: '3rem 1.5rem', boxShadow: 'var(--shadow-sm)' }}>
+                <LinkIcon size={36} color="var(--text-muted)" style={{ margin: '0 auto 1rem' }} />
+                <h3 style={{ fontWeight: 800, marginBottom: '0.25rem' }}>No links created yet</h3>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>Shorten your first link above to view analytics.</p>
+                <a href="#shorten" className="btn btn-primary">Create a Link</a>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 1fr) 1.5fr', gap: '1.5rem' }}>
+                {/* Link Table / List */}
+                <div className="neo-card" style={{ padding: '1rem', boxShadow: 'var(--shadow-sm)' }}>
+                  <div style={{ fontWeight: 800, padding: '0.5rem', borderBottom: '2px solid var(--border-color)', marginBottom: '0.5rem' }}>
+                    Select Link to Inspect
                   </div>
-                  <div class="stat-card">
-                    <div class="stat-label">Link Status</div>
-                    <div 
-                      class="stat-value" 
-                      style={{ fontSize: '1.5rem', color: analyticsData.isExpired ? '#DC2626' : '#059669' }}
-                    >
-                      {analyticsData.isExpired ? 'Expired' : 'Active'}
-                    </div>
-                  </div>
-                  <div class="stat-card">
-                    <div class="stat-label">Destination URL</div>
-                    <div style={{ fontSize: '0.95rem', fontFamily: 'var(--font-mono)', wordBreak: 'break-all', marginTop: '0.5rem' }}>
-                      {analyticsData.originalUrl}
-                    </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {userLinks.map((link) => (
+                      <div 
+                        key={link.id}
+                        onClick={() => handleInspectLink(link.shortCode)}
+                        style={{
+                          padding: '0.75rem',
+                          border: '2px solid var(--border-color)',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: selectedLink === link.shortCode ? '#EFF6FF' : '#FFFFFF',
+                          borderColor: selectedLink === link.shortCode ? '#2563EB' : 'var(--border-color)',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#2563EB' }}>
+                            /{link.shortCode}
+                          </span>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 700, background: '#F3F4F6', padding: '0.15rem 0.5rem', borderRadius: '4px' }}>
+                            {link.totalClicks} clicks
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {link.originalUrl}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                {/* 30-Day SVG Trend Chart */}
-                <div class="chart-card">
-                  <div style={{ fontWeight: 800, fontSize: '1.1rem', marginBottom: '1.25rem' }}>
-                    30-Day Click Trend
-                  </div>
-                  <SvgTrendChart dailyData={analyticsData.stats.clicksByDay || []} />
-                </div>
+                {/* Selected Link Analytics Inspector */}
+                <div>
+                  {selectedLink && (
+                    <div className="neo-card" style={{ boxShadow: 'var(--shadow-md)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                        <div>
+                          <span style={{ fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 800, color: 'var(--text-muted)' }}>
+                            Link Analytics
+                          </span>
+                          <h3 style={{ fontSize: '1.5rem', fontWeight: 900, fontFamily: 'var(--font-mono)' }}>
+                            /{selectedLink}
+                          </h3>
+                        </div>
+                        <button 
+                          type="button" 
+                          onClick={() => handleDeleteLink(selectedLink)}
+                          disabled={deletingCode === selectedLink}
+                          className="btn btn-danger"
+                          style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem' }}
+                        >
+                          <Trash2 size={14} />
+                          <span>Delete</span>
+                        </button>
+                      </div>
 
-                {/* Top Referrers */}
-                <div class="chart-card">
-                  <div style={{ fontWeight: 800, fontSize: '1.1rem', marginBottom: '0.75rem' }}>
-                    Top Traffic Referrers
-                  </div>
-                  {(!analyticsData.stats.topReferrers || analyticsData.stats.topReferrers.length === 0) ? (
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>No clicks recorded yet.</p>
-                  ) : (
-                    <ul style={{ listStyle: 'none' }}>
-                      {analyticsData.stats.topReferrers.map((item, idx) => (
-                        <li key={idx} class="referrer-item">
-                          <span style={{ fontWeight: 600 }}>{item.source}</span>
-                          <span style={{ fontFamily: 'var(--font-mono)' }}>{item.count} clicks</span>
-                        </li>
-                      ))}
-                    </ul>
+                      {analyticsLoading ? (
+                        <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                          Loading analytics...
+                        </div>
+                      ) : analyticsData ? (
+                        <div>
+                          <div className="stats-grid">
+                            <div className="stat-card">
+                              <div className="stat-label">Total Clicks</div>
+                              <div className="stat-value">{analyticsData.stats.totalClicks.toLocaleString()}</div>
+                            </div>
+                            <div className="stat-card">
+                              <div className="stat-label">Status</div>
+                              <div className="stat-value" style={{ fontSize: '1.35rem', color: analyticsData.isExpired ? '#DC2626' : '#059669' }}>
+                                {analyticsData.isExpired ? 'Expired' : 'Active'}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 30-Day SVG Chart */}
+                          <div className="chart-card">
+                            <div style={{ fontWeight: 800, fontSize: '1rem', marginBottom: '1rem' }}>
+                              30-Day Click Trend
+                            </div>
+                            <SvgTrendChart dailyData={analyticsData.stats.clicksByDay || []} />
+                          </div>
+
+                          {/* Top Referrers */}
+                          <div className="chart-card" style={{ marginBottom: 0 }}>
+                            <div style={{ fontWeight: 800, fontSize: '1rem', marginBottom: '0.75rem' }}>
+                              Top Referrers
+                            </div>
+                            {analyticsData.stats.topReferrers.length === 0 ? (
+                              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No clicks recorded yet.</p>
+                            ) : (
+                              <ul style={{ listStyle: 'none' }}>
+                                {analyticsData.stats.topReferrers.map((item, idx) => (
+                                  <li key={idx} className="referrer-item">
+                                    <span style={{ fontWeight: 600 }}>{item.source}</span>
+                                    <span style={{ fontFamily: 'var(--font-mono)' }}>{item.count} clicks</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+
+                  {!selectedLink && (
+                    <div className="neo-card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)', boxShadow: 'var(--shadow-sm)' }}>
+                      <BarChart2 size={32} style={{ margin: '0 auto 0.5rem', opacity: 0.5 }} />
+                      <p>Select any link from the left to view click trends.</p>
+                    </div>
                   )}
                 </div>
-
-                {/* Danger Zone: Delete */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-                  <button 
-                    type="button" 
-                    onClick={handleDeleteLink} 
-                    disabled={deleting} 
-                    class="btn btn-danger"
-                  >
-                    <Trash2 size={16} />
-                    <span>{deleting ? 'Deleting...' : 'Delete This Link'}</span>
-                  </button>
-                </div>
               </div>
             )}
-          </div>
-        </section>
+          </section>
+        )}
 
-        {/* Pricing / Tiers Section */}
-        <section id="plans" class="pricing-section">
-          <div class="container">
+        {/* Transparent Tiers Section */}
+        <section id="plans" className="pricing-section">
+          <div className="container">
             <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
-              <h2 style={{ fontSize: '2rem', fontWeight: 900 }}>Transparent Tiers & Roadmap</h2>
+              <h2 style={{ fontSize: '2rem', fontWeight: 900 }}>Simple, Transparent Usage</h2>
               <p style={{ color: 'var(--text-muted)' }}>
-                Our production open-source engine active today, alongside planned high-throughput expansions.
+                Try 1 link free, or sign in with Google for unlimited links and real-time analytics.
               </p>
             </div>
 
-            <div class="pricing-grid">
-              {/* Community OSS */}
-              <div class="plan-card featured">
-                <span class="plan-badge">Active Deployment</span>
-                <h3 class="plan-name">Community OSS</h3>
-                <div class="plan-price">$0 <span>/ forever</span></div>
-                <ul class="plan-features">
-                  <li class="plan-feature-item">✔ <strong>10 links / minute</strong> rate limit per IP</li>
-                  <li class="plan-feature-item">✔ <strong>Sub-2ms Redis</strong> cache-aside redirect latency</li>
-                  <li class="plan-feature-item">✔ <strong>30-day analytics</strong> trend retention</li>
-                  <li class="plan-feature-item">✔ <strong>Custom aliases</strong> & expiration controls</li>
-                  <li class="plan-feature-item">✔ <strong>Zero IP storage</strong> (Privacy by Design)</li>
-                  <li class="plan-feature-item">✔ <strong>Hashed tokens</strong> for authorization</li>
+            <div className="pricing-grid">
+              {/* Free Trial */}
+              <div className="plan-card">
+                <h3 className="plan-name">Anonymous Trial</h3>
+                <div className="plan-price">$0 <span>/ try</span></div>
+                <ul className="plan-features">
+                  <li className="plan-feature-item">✔ <strong>1 free short link</strong> without an account</li>
+                  <li className="plan-feature-item">✔ <strong>Sub-2ms Redis</strong> cache-aside redirect</li>
+                  <li className="plan-feature-item">✔ <strong>Full protocol security</strong> & validation</li>
+                  <li className="plan-feature-item" style={{ opacity: 0.6 }}>✖ No analytics dashboard</li>
+                  <li className="plan-feature-item" style={{ opacity: 0.6 }}>✖ Cannot edit or delete link</li>
                 </ul>
-                <a href="#shorten" class="btn btn-primary">Start Shortening</a>
+                <a href="#shorten" className="btn btn-secondary">Try 1 Link</a>
               </div>
 
-              {/* Pro Cloud (Future Vision) */}
-              <div class="plan-card">
-                <h3 class="plan-name">Pro Cloud</h3>
-                <div class="plan-price">$12 <span>/ month (Planned)</span></div>
-                <ul class="plan-features">
-                  <li class="plan-feature-item">⏳ <strong>Custom domains</strong> (e.g. go.brand.com)</li>
-                  <li class="plan-feature-item">⏳ <strong>1,000 links / min</strong> high-throughput tier</li>
-                  <li class="plan-feature-item">⏳ <strong>Multi-region Redis</strong> replication</li>
-                  <li class="plan-feature-item">⏳ <strong>Real-time webhooks</strong> on click events</li>
-                  <li class="plan-feature-item">⏳ <strong>Team accounts</strong> & RBAC permissions</li>
-                  <li class="plan-feature-item">⏳ <strong>SSO / SAML login</strong> integration</li>
+              {/* Authenticated Community Plan */}
+              <div className="plan-card featured">
+                <span className="plan-badge">Most Popular</span>
+                <h3 className="plan-name">Google Sign-In</h3>
+                <div className="plan-price">$0 <span>/ forever</span></div>
+                <ul className="plan-features">
+                  <li className="plan-feature-item">✔ <strong>Unlimited short links</strong> per user</li>
+                  <li className="plan-feature-item">✔ <strong>Full 30-day analytics</strong> & charts</li>
+                  <li className="plan-feature-item">✔ <strong>Manage & delete</strong> your short URLs</li>
+                  <li className="plan-feature-item">✔ <strong>Custom aliases</strong> & expiration dates</li>
+                  <li className="plan-feature-item">✔ <strong>Zero tokens to lose</strong> — securely linked to Google</li>
                 </ul>
-                <button type="button" class="btn btn-secondary" disabled style={{ opacity: 0.6, cursor: 'not-allowed' }}>
-                  Coming Soon
+                <button type="button" onClick={handleGoogleSignIn} className="btn btn-primary">
+                  Sign in with Google
                 </button>
               </div>
             </div>
@@ -447,11 +569,10 @@ export default function App() {
         </section>
       </main>
 
-      {/* Footer */}
-      <footer class="site-footer">
-        <div class="container">
+      <footer className="site-footer">
+        <div className="container">
           <p style={{ fontWeight: 700, marginBottom: '0.5rem' }}>
-            ⚡ sho.rt — Engineered with Node.js, Express, PostgreSQL, Redis, and React.
+            ⚡ sho.rt — Engineered with Node.js, PostgreSQL, Redis, React & Google OAuth.
           </p>
           <p>Built for PayPal-level backend interviews. Zero tracking cookies. 100% Free & Open Source.</p>
         </div>
@@ -460,9 +581,6 @@ export default function App() {
   );
 }
 
-/**
- * Pure SVG Mathematical Chart Component (Zero external dependencies)
- */
 function SvgTrendChart({ dailyData }) {
   if (!dailyData || dailyData.length === 0) {
     return (
