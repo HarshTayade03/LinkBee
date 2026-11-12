@@ -16,8 +16,8 @@ Welcome! This study guide accompanies our production-grade URL Shortener. It is 
 | **[07-frontend.md](07-frontend.md)** | **Phase 7: Accessible Frontend** | Semantic HTML, CSS design tokens, DOM security (safe rendering without innerHTML), fetch & error handling. | Completed |
 | **[08-benchmarks.md](08-benchmarks.md)** | **Phase 8: Load Testing & Real Numbers** | k6 / autocannon load tests, latency distributions (p50, p95, p99), cache performance validation. | Completed |
 | **[09-packaging-and-ci.md](09-packaging-and-ci.md)** | **Phase 9: Packaging & CI/CD** | Multi-stage Docker builds, non-root execution, GitHub Actions workflows, lockfile security audits. | Completed |
-| **[10-deployment.md](10-deployment.md)** | **Phase 10: Free Tier Cloud Deployment** | Production deployment, managed databases, environment variables, SSL/TLS, and handling free-tier cold starts. | Pending |
-| **[11-operations.md](11-operations.md)** | **Phase 11: Production Operations** | Operational runbooks, structured log analysis, incident response, handling abusive links, and secret rotation. | Pending |
+| **[10-deployment.md](10-deployment.md)** | **Phase 10: Free Tier Cloud Deployment** | Production deployment, managed databases, environment variables, SSL/TLS, and handling free-tier cold starts. | Completed |
+| **[11-operations.md](11-operations.md)** | **Phase 11: Production Operations** | Operational runbooks, structured log analysis, incident response, handling abusive links, and secret rotation. | Completed |
 
 ---
 
