@@ -7,7 +7,8 @@ const pool = new Pool({
   // Limit max connections to avoid exhausting PostgreSQL connection slots
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000, // 10s timeout to allow cold-start serverless compute wake
+  ssl: config.databaseUrl && config.databaseUrl.includes('neon.tech') ? { rejectUnauthorized: false } : undefined,
 });
 
 pool.on('error', (err) => {
