@@ -11,11 +11,14 @@ import {
   LogOut, 
   Clock, 
   Shield, 
-  MousePointer, 
   User, 
-  AlertCircle,
-  Calendar,
-  X
+  AlertCircle, 
+  Calendar, 
+  X,
+  Mail,
+  Lock,
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 import { 
   BeeSpot, 
@@ -28,12 +31,25 @@ import logoImg from './assets/logo.jpg';
 
 export default function App() {
   // Navigation / Page state
-  const [currentPage, setCurrentPage] = useState('landing'); // 'landing', 'dashboard', 'analytics', 'account', 'terms', 'privacy', 'report', 'expired', 'not-found'
+  const [currentPage, setCurrentPage] = useState('landing'); // 'landing', 'dashboard', 'account', 'auth', 'verify-email', 'terms', 'privacy', 'report', 'expired', 'not-found'
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'signup'
   const [toastMessage, setToastMessage] = useState('');
 
   // Session state
   const [currentUser, setCurrentUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+
+  // Auth form state
+  const [authEmail, setAuthEmail] = useState('');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authFormError, setAuthFormError] = useState('');
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+
+  // Email verification page state
+  const [verificationStatus, setVerificationStatus] = useState('pending'); // 'pending', 'success', 'error'
+  const [verificationMessage, setVerificationMessage] = useState('');
+  const [resendingEmail, setResendingEmail] = useState(false);
 
   // Landing Hero / Composer state
   const [heroUrl, setHeroUrl] = useState('');
@@ -59,12 +75,20 @@ export default function App() {
   const [openFaq, setOpenFaq] = useState(null);
 
   useEffect(() => {
-    checkSession();
+    // Check if on /verify-email path with token
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    if (window.location.pathname === '/verify-email' && token) {
+      setCurrentPage('verify-email');
+      handleVerifyToken(token);
+    } else {
+      checkSession();
+    }
   }, []);
 
   const showToast = (msg) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 2500);
+    setTimeout(() => setToastMessage(''), 2800);
   };
 
   const checkSession = async () => {
@@ -99,29 +123,81 @@ export default function App() {
     }
   };
 
-  const handleSignIn = async () => {
-    setAuthLoading(true);
+  const handleVerifyToken = async (token) => {
+    setVerificationStatus('pending');
     try {
-      const res = await fetch('/api/v1/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          devMock: true,
-          mockEmail: 'alex@linkbee.co',
-          mockName: 'Alex Mercer',
-        }),
-      });
+      const res = await fetch(`/api/v1/auth/verify-email?token=${encodeURIComponent(token)}`);
       const data = await res.json();
       if (data.success) {
-        setCurrentUser(data.data.user);
-        loadUserLinks();
-        setCurrentPage('dashboard');
-        showToast('Signed in successfully');
+        setVerificationStatus('success');
+        setVerificationMessage(data.message || 'Email verified successfully!');
+        if (data.data?.user) {
+          setCurrentUser(data.data.user);
+        }
+        showToast('Email verified! You now have unlimited short links.');
+      } else {
+        setVerificationStatus('error');
+        setVerificationMessage(data.error?.message || 'Verification link is invalid or expired.');
       }
-    } catch (err) {
-      console.error('Sign in error:', err);
+    } catch {
+      setVerificationStatus('error');
+      setVerificationMessage('Failed to connect to verification server. Please try again.');
     } finally {
       setAuthLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setResendingEmail(true);
+    try {
+      const res = await fetch('/api/v1/auth/resend-verification', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Verification email resent! Check your inbox.');
+      } else {
+        showToast(data.error?.message || 'Could not resend email.');
+      }
+    } catch {
+      showToast('Network error resending email.');
+    } finally {
+      setResendingEmail(false);
+    }
+  };
+
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthFormError('');
+    setAuthSubmitting(true);
+
+    const endpoint = authMode === 'signup' ? '/api/v1/auth/signup' : '/api/v1/auth/login';
+    const payload = authMode === 'signup'
+      ? { username: authUsername.trim(), email: authEmail.trim(), password: authPassword }
+      : { login: (authEmail || authUsername).trim(), password: authPassword };
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setAuthFormError(data.error?.message || 'Authentication failed. Please check your details.');
+        setAuthSubmitting(false);
+        return;
+      }
+
+      setCurrentUser(data.data.user);
+      loadUserLinks();
+      setCurrentPage('dashboard');
+      showToast(authMode === 'signup' ? 'Account created! 5 free links unlocked.' : 'Signed in successfully');
+      setAuthPassword('');
+    } catch {
+      setAuthFormError('Network connection issue. Please try again.');
+    } finally {
+      setAuthSubmitting(false);
     }
   };
 
@@ -139,7 +215,6 @@ export default function App() {
     }
   };
 
-  // Full 5-State Anonymous Shorten Engine
   const handleShorten = async (e) => {
     if (e) e.preventDefault();
     setComposerError('');
@@ -167,16 +242,23 @@ export default function App() {
 
       const data = await res.json();
 
-      if (res.status === 403 && data.error?.code === 'AUTH_REQUIRED_LIMIT') {
-        // State 4: Free anonymous link already used
-        setComposerState('quota_exceeded');
-        setComposerLoading(false);
-        return;
+      if (res.status === 403) {
+        if (data.error?.code === 'AUTH_REQUIRED_LIMIT') {
+          // Guest trial limit reached
+          setComposerState('quota_exceeded');
+          setComposerLoading(false);
+          return;
+        } else if (data.error?.code === 'VERIFICATION_REQUIRED_LIMIT') {
+          // Unverified user 5-link limit reached
+          setComposerError(data.error.message);
+          setComposerState('error');
+          setComposerLoading(false);
+          return;
+        }
       }
 
       if (!res.ok) {
-        // State 5: Validation or conflict error
-        let errorMsg = data.error?.message || 'That does not look like a link. Try adding https:// at the start.';
+        let errorMsg = data.error?.message || 'That does not look like a valid link. Try adding https:// at the start.';
         if (data.error?.code === 'ALIAS_IN_USE') {
           errorMsg = `The custom back-half "${customAlias}" is already taken. Try another name.`;
         }
@@ -186,7 +268,7 @@ export default function App() {
         return;
       }
 
-      // State 3: Success
+      // Success
       setCreatedResult(data.data);
       setComposerState('success');
       setComposerLoading(false);
@@ -194,6 +276,7 @@ export default function App() {
       if (currentUser) {
         loadUserLinks();
         fetchAnalytics(data.data.shortCode);
+        checkSession(); // Update link count
       }
     } catch {
       setComposerError('Network connection issue. Please check your connection and try again.');
@@ -233,6 +316,7 @@ export default function App() {
           setAnalyticsData(null);
         }
         showToast('Link deleted');
+        checkSession();
       }
     } catch (err) {
       console.error('Delete error:', err);
@@ -256,7 +340,6 @@ export default function App() {
     setComposerError('');
   };
 
-  // Filtered links for dashboard
   const filteredLinks = userLinks.filter((l) => 
     l.shortCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
     l.originalUrl.toLowerCase().includes(searchQuery.toLowerCase())
@@ -264,7 +347,7 @@ export default function App() {
 
   return (
     <div className="site-wrapper">
-      {/* Toast Notification (Announced for Screen Readers) */}
+      {/* Toast Notification */}
       {toastMessage && (
         <div className="toast-notice" role="status" aria-live="polite">
           <Check size={16} />
@@ -272,7 +355,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Top Navigation: Solid, 64px, Sticky, 1px border */}
+      {/* Top Navigation */}
       <header className="site-nav">
         <div className="site-nav-inner">
           <a 
@@ -307,10 +390,17 @@ export default function App() {
               </>
             ) : (
               <>
-                <button onClick={handleSignIn} className="nav-link" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <button 
+                  onClick={() => { setAuthMode('login'); setCurrentPage('auth'); setAuthFormError(''); }} 
+                  className="nav-link" 
+                  style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                >
                   Log in
                 </button>
-                <button onClick={handleSignIn} className="btn btn-primary">
+                <button 
+                  onClick={() => { setAuthMode('signup'); setCurrentPage('auth'); setAuthFormError(''); }} 
+                  className="btn btn-primary"
+                >
                   Sign up free
                 </button>
               </>
@@ -318,6 +408,184 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Unverified Email Warning Banner (Logged in) */}
+      {currentUser && !currentUser.isVerified && currentPage !== 'verify-email' && (
+        <div style={{ background: '#FFFBEB', borderBottom: '1px solid #FDE68A', padding: '10px 24px', fontSize: '0.86rem', color: '#92400E', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
+          <span>
+            <strong>Verify your email ({currentUser.email})</strong> to unlock unlimited short links (currently 5 free links available).
+          </span>
+          <button 
+            onClick={handleResendVerification} 
+            disabled={resendingEmail}
+            className="btn btn-secondary" 
+            style={{ padding: '4px 10px', fontSize: '0.78rem', minHeight: 'auto', background: '#FFFFFF' }}
+          >
+            {resendingEmail ? 'Sending...' : 'Resend verification email'}
+          </button>
+        </div>
+      )}
+
+      {/* =========================================================================
+          PAGE: EMAIL & PASSWORD AUTH (Sign up / Log in)
+          ========================================================================= */}
+      {currentPage === 'auth' && (
+        <main style={{ maxWidth: '420px', margin: '60px auto', padding: '0 24px', flex: 1, width: '100%' }}>
+          <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+            <img src={logoImg} alt="LinkBee" style={{ width: '42px', height: '42px', borderRadius: '10px', margin: '0 auto 12px auto' }} />
+            <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: '#1C1B19', letterSpacing: '-0.02em' }}>
+              {authMode === 'signup' ? 'Create your LinkBee account' : 'Welcome back to LinkBee'}
+            </h1>
+            <p style={{ fontSize: '0.9rem', color: '#63615C', marginTop: '6px' }}>
+              {authMode === 'signup' 
+                ? 'Get 5 free short links instantly. Verify email for unlimited links.' 
+                : 'Enter your credentials to access your links and analytics.'}
+            </p>
+          </div>
+
+          <div style={{ background: '#FFFFFF', border: '1px solid #E7E4DC', borderRadius: '12px', padding: '28px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+            <form onSubmit={handleAuthSubmit}>
+              {authMode === 'signup' && (
+                <div style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Username</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. alex_mercer"
+                    value={authUsername}
+                    onChange={(e) => setAuthUsername(e.target.value)}
+                    required
+                    autoFocus
+                  />
+                  <span style={{ fontSize: '0.75rem', color: '#8F8D87' }}>Letters, numbers, underscores and hyphens</span>
+                </div>
+              )}
+
+              <div style={{ marginBottom: '16px' }}>
+                <label className="form-label">{authMode === 'signup' ? 'Email Address' : 'Email or Username'}</label>
+                <input
+                  type={authMode === 'signup' ? 'email' : 'text'}
+                  className="form-input"
+                  placeholder={authMode === 'signup' ? 'you@domain.com' : 'you@domain.com or username'}
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  required
+                  autoFocus={authMode === 'login'}
+                />
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <label className="form-label">Password</label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="••••••••"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  required
+                />
+                {authMode === 'signup' && (
+                  <span style={{ fontSize: '0.75rem', color: '#8F8D87' }}>Minimum 6 characters</span>
+                )}
+              </div>
+
+              {authFormError && (
+                <div className="hero-error-banner" style={{ marginBottom: '16px' }} role="alert">
+                  <AlertCircle size={16} />
+                  <span>{authFormError}</span>
+                </div>
+              )}
+
+              <button 
+                type="submit" 
+                className="btn btn-primary" 
+                style={{ width: '100%', minHeight: '44px', fontSize: '0.95rem' }}
+                disabled={authSubmitting}
+              >
+                {authSubmitting 
+                  ? 'Please wait...' 
+                  : authMode === 'signup' ? 'Create free account' : 'Sign in'}
+              </button>
+            </form>
+
+            <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '0.86rem', color: '#63615C' }}>
+              {authMode === 'signup' ? (
+                <>
+                  Already have an account?{' '}
+                  <button 
+                    onClick={() => { setAuthMode('login'); setAuthFormError(''); }}
+                    style={{ background: 'none', border: 'none', color: '#1C1B19', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    Log in
+                  </button>
+                </>
+              ) : (
+                <>
+                  Don't have an account yet?{' '}
+                  <button 
+                    onClick={() => { setAuthMode('signup'); setAuthFormError(''); }}
+                    style={{ background: 'none', border: 'none', color: '#1C1B19', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    Sign up free
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </main>
+      )}
+
+      {/* =========================================================================
+          PAGE: EMAIL VERIFICATION CONFIRMATION (/verify-email)
+          ========================================================================= */}
+      {currentPage === 'verify-email' && (
+        <main style={{ maxWidth: '480px', margin: '70px auto', padding: '0 24px', textAlign: 'center', flex: 1 }}>
+          {verificationStatus === 'pending' && (
+            <div>
+              <RefreshCw size={40} className="faq-icon open" style={{ margin: '0 auto 16px auto', color: '#E58E1A' }} />
+              <h1 style={{ fontSize: '1.6rem', fontWeight: 700 }}>Verifying your email...</h1>
+              <p style={{ fontSize: '0.92rem', color: '#63615C', marginTop: '8px' }}>Please hold on while we confirm your account.</p>
+            </div>
+          )}
+
+          {verificationStatus === 'success' && (
+            <div>
+              <BeeSpot size={80} />
+              <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: '16px', color: '#15803D' }}>Email verified!</h1>
+              <p style={{ fontSize: '0.95rem', color: '#63615C', lineHeight: 1.6, marginTop: '8px', marginBottom: '28px' }}>
+                Your email address has been verified. You now have <strong>unlimited short links</strong> and full real-time analytics access!
+              </p>
+              <button 
+                onClick={() => setCurrentPage('dashboard')} 
+                className="btn btn-primary"
+                style={{ padding: '10px 24px' }}
+              >
+                Go to your Dashboard →
+              </button>
+            </div>
+          )}
+
+          {verificationStatus === 'error' && (
+            <div>
+              <AlertCircle size={48} color="#B91C1C" style={{ margin: '0 auto 16px auto' }} />
+              <h1 style={{ fontSize: '1.6rem', fontWeight: 700, color: '#B91C1C' }}>Verification Failed</h1>
+              <p style={{ fontSize: '0.92rem', color: '#63615C', lineHeight: 1.6, marginTop: '8px', marginBottom: '24px' }}>
+                {verificationMessage}
+              </p>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                <button onClick={() => setCurrentPage('landing')} className="btn btn-secondary">
+                  Back to home
+                </button>
+                {currentUser && (
+                  <button onClick={handleResendVerification} className="btn btn-primary">
+                    Resend verification email
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </main>
+      )}
 
       {/* =========================================================================
           PAGE: LANDING PAGE
@@ -370,14 +638,16 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="hero-result-prompt">
-                    <span style={{ fontSize: '0.88rem', color: '#63615C' }}>
-                      Want to see who clicks this? Create a free account to track clicks.
-                    </span>
-                    <button onClick={handleSignIn} className="btn btn-secondary" style={{ padding: '6px 14px' }}>
-                      Sign up free
-                    </button>
-                  </div>
+                  {!currentUser && (
+                    <div className="hero-result-prompt">
+                      <span style={{ fontSize: '0.88rem', color: '#63615C' }}>
+                        Want to see who clicks this? Create a free account to track clicks and get 5 links.
+                      </span>
+                      <button onClick={() => { setAuthMode('signup'); setCurrentPage('auth'); }} className="btn btn-secondary" style={{ padding: '6px 14px' }}>
+                        Sign up free
+                      </button>
+                    </div>
+                  )}
 
                   <div style={{ marginTop: '14px', textAlign: 'right' }}>
                     <button 
@@ -395,16 +665,16 @@ export default function App() {
                   <BeeSpot size={56} />
                   <div>
                     <h3 style={{ fontSize: '1.05rem', fontWeight: 600, marginBottom: '6px' }}>
-                      You've used your free link.
+                      You've used your 1 free guest link.
                     </h3>
                     <p style={{ fontSize: '0.9rem', color: '#63615C', marginBottom: '16px', lineHeight: 1.5 }}>
-                      Sign up free to make unlimited links and watch clicks come in. Your link is still saved in the box below.
+                      Sign up for a free account to unlock 5 short links immediately, or verify your email for unlimited links and click analytics.
                     </p>
                     <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                      <button onClick={handleSignIn} className="btn btn-primary">
+                      <button onClick={() => { setAuthMode('signup'); setCurrentPage('auth'); }} className="btn btn-primary">
                         Sign up free
                       </button>
-                      <button onClick={handleSignIn} className="nav-link" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                      <button onClick={() => { setAuthMode('login'); setCurrentPage('auth'); }} className="nav-link" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                         Log in
                       </button>
                     </div>
@@ -435,7 +705,9 @@ export default function App() {
                   {/* Options Drawer Toggle */}
                   <div className="link-box-note">
                     <span>
-                      {currentUser ? 'Unlimited links with your account' : 'Your first link is free with no account.'}
+                      {currentUser 
+                        ? (currentUser.isVerified ? 'Unlimited links with verified account' : `${5 - (currentUser.linkCount || 0)} of 5 free links remaining`)
+                        : 'Your first link is free with no account.'}
                     </span>
                     <button
                       type="button"
@@ -484,7 +756,7 @@ export default function App() {
             </div>
           </section>
 
-          {/* How It Works Strip (Three short steps in one quiet row) */}
+          {/* How It Works Strip */}
           <section className="how-it-works-section">
             <div className="how-it-works-grid">
               <div className="step-item">
@@ -502,12 +774,12 @@ export default function App() {
               <div className="step-item">
                 <span className="step-num">Step 3</span>
                 <h3 className="step-title">Share and watch clicks</h3>
-                <p className="step-desc">Share anywhere and follow daily clicks and traffic sources in your dashboard.</p>
+                <p className="step-desc">Follow daily click volume and top referral sources directly in your personal dashboard.</p>
               </div>
             </div>
           </section>
 
-          {/* Feature Cards Section (Bitly pattern: visual on top, title, 1 sentence benefit, text action) */}
+          {/* Feature Cards Section */}
           <section className="features-section">
             <div className="section-header">
               <div className="section-label">Features</div>
@@ -515,7 +787,7 @@ export default function App() {
             </div>
 
             <div className="features-grid">
-              {/* Card 1: Shorten any link */}
+              {/* Card 1 */}
               <div className="feature-card">
                 <div className="card-visual-top">
                   <div className="mini-link-bar">
@@ -531,7 +803,7 @@ export default function App() {
                 </a>
               </div>
 
-              {/* Card 2: Custom back-half */}
+              {/* Card 2 */}
               <div className="feature-card">
                 <div className="card-visual-top">
                   <span className="mini-pill-tag">linkbee.co/summer-sale</span>
@@ -544,7 +816,7 @@ export default function App() {
                 </a>
               </div>
 
-              {/* Card 3: Real Click Stats */}
+              {/* Card 3 */}
               <div className="feature-card">
                 <div className="card-visual-top">
                   <div className="mini-sparkline">
@@ -558,13 +830,13 @@ export default function App() {
                 </div>
                 <h3 className="card-title">See who clicks</h3>
                 <p className="card-benefit">Watch clicks come in over time and see where your visitors come from.</p>
-                <button onClick={handleSignIn} className="card-action" style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                <button onClick={() => { setAuthMode('signup'); setCurrentPage('auth'); }} className="card-action" style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
                   <span>View click stats</span>
                   <ArrowRight size={14} className="card-action-arrow" />
                 </button>
               </div>
 
-              {/* Card 4: Scheduled Expiration */}
+              {/* Card 4 */}
               <div className="feature-card">
                 <div className="card-visual-top">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#FFFFFF', padding: '8px 14px', borderRadius: '6px', border: '1px solid #E7E4DC' }}>
@@ -580,7 +852,7 @@ export default function App() {
                 </a>
               </div>
 
-              {/* Card 5: Link Management */}
+              {/* Card 5 */}
               <div className="feature-card">
                 <div className="card-visual-top">
                   <div style={{ width: '100%', maxWidth: '240px', background: '#FFFFFF', border: '1px solid #E7E4DC', borderRadius: '6px', padding: '8px 12px' }}>
@@ -591,13 +863,13 @@ export default function App() {
                 </div>
                 <h3 className="card-title">Keep it all in one place</h3>
                 <p className="card-benefit">Search, copy and clean up every link from a single dashboard.</p>
-                <button onClick={handleSignIn} className="card-action" style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+                <button onClick={() => { setAuthMode('login'); setCurrentPage('auth'); }} className="card-action" style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
                   <span>Open dashboard</span>
                   <ArrowRight size={14} className="card-action-arrow" />
                 </button>
               </div>
 
-              {/* Card 6: Privacy by Design */}
+              {/* Card 6 */}
               <div className="feature-card">
                 <div className="card-visual-top">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#FFFFFF', padding: '8px 14px', borderRadius: '6px', border: '1px solid #E7E4DC' }}>
@@ -615,7 +887,7 @@ export default function App() {
             </div>
           </section>
 
-          {/* Analytics Showcase (Accurate mock with real stats) */}
+          {/* Analytics Showcase */}
           <section className="analytics-showcase-section">
             <div className="analytics-showcase-grid">
               <div>
@@ -643,13 +915,13 @@ export default function App() {
                   <div style={{ display: 'flex', gap: '12px' }}>
                     <Check size={18} color="#15803D" style={{ flexShrink: 0, marginTop: '2px' }} />
                     <span style={{ fontSize: '0.92rem', color: '#1C1B19' }}>
-                      <strong>Browser and device insight</strong> without compromising reader privacy.
+                      <strong>Browser and device insight</strong> without compromising visitor privacy.
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* Real UI Mock (Accurate to LinkBee's actual data model) */}
+              {/* Real UI Mock */}
               <div className="analytics-mock-card">
                 <div className="analytics-mock-header">
                   <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.95rem' }}>
@@ -694,29 +966,7 @@ export default function App() {
             </div>
           </section>
 
-          {/* "Made For" Row (Plain, Honest Use Cases) */}
-          <section className="made-for-section">
-            <div className="made-for-grid">
-              <div className="made-for-item">
-                <h4 className="made-for-title">Posters and flyers</h4>
-                <p className="made-for-desc">Short links that people can easily read and type into their phones.</p>
-              </div>
-              <div className="made-for-item">
-                <h4 className="made-for-title">Social bios and posts</h4>
-                <p className="made-for-desc">Clean, memorable links that do not clutter your message or character limit.</p>
-              </div>
-              <div className="made-for-item">
-                <h4 className="made-for-title">Messages and emails</h4>
-                <p className="made-for-desc">Replace unwieldy paragraph-long URLs with clear, single-line links.</p>
-              </div>
-              <div className="made-for-item">
-                <h4 className="made-for-title">Event registrations</h4>
-                <p className="made-for-desc">Set links to turn off after the sign-up deadline so nobody registers late.</p>
-              </div>
-            </div>
-          </section>
-
-          {/* FAQ Accordion (Truthful to codebase) */}
+          {/* FAQ Accordion */}
           <section className="faq-section">
             <div className="section-header">
               <div className="section-label">Questions & Answers</div>
@@ -729,12 +979,12 @@ export default function App() {
                 onClick={() => setOpenFaq(openFaq === 1 ? null : 1)}
                 aria-expanded={openFaq === 1}
               >
-                <span>Is LinkBee free to use?</span>
+                <span>How many short links can I create?</span>
                 <ChevronDown size={18} className={`faq-icon ${openFaq === 1 ? 'open' : ''}`} />
               </button>
               {openFaq === 1 && (
                 <div className="faq-content">
-                  Yes. You can create your first link without an account. Creating additional links and viewing click statistics requires a free account.
+                  You can create 1 link without signing up. Creating a free account gives you 5 short links immediately. Verifying your email address unlocks unlimited short links.
                 </div>
               )}
             </div>
@@ -750,7 +1000,7 @@ export default function App() {
               </button>
               {openFaq === 2 && (
                 <div className="faq-content">
-                  No, you can shorten one link immediately as a guest. To shorten more links, you can sign in with your Google account.
+                  No, you can shorten one link immediately as a guest. To shorten more links and access click analytics, you can create a free account with your email and password.
                 </div>
               )}
             </div>
@@ -761,12 +1011,12 @@ export default function App() {
                 onClick={() => setOpenFaq(openFaq === 3 ? null : 3)}
                 aria-expanded={openFaq === 3}
               >
-                <span>What happens after I use my free trial link?</span>
+                <span>How do I unlock unlimited short links?</span>
                 <ChevronDown size={18} className={`faq-icon ${openFaq === 3 ? 'open' : ''}`} />
               </button>
               {openFaq === 3 && (
                 <div className="faq-content">
-                  If you attempt to shorten a second link without signing in, LinkBee will prompt you to sign in with Google. Once signed in, you can create unlimited links.
+                  When you sign up, we send a verification link to your email address. Simply click the verification link in your email to instantly verify your account and unlock unlimited links.
                 </div>
               )}
             </div>
@@ -782,7 +1032,7 @@ export default function App() {
               </button>
               {openFaq === 4 && (
                 <div className="faq-content">
-                  Links do not expire unless you set an expiration date when creating the link. If you choose an expiration date, the link switches off automatically after that time.
+                  Links do not expire unless you choose an expiration date when creating the link. If you choose an expiration date, the link switches off automatically after that time.
                 </div>
               )}
             </div>
@@ -809,26 +1059,10 @@ export default function App() {
                 onClick={() => setOpenFaq(openFaq === 6 ? null : 6)}
                 aria-expanded={openFaq === 6}
               >
-                <span>What happens if I delete a link?</span>
+                <span>Who can see my click statistics?</span>
                 <ChevronDown size={18} className={`faq-icon ${openFaq === 6 ? 'open' : ''}`} />
               </button>
               {openFaq === 6 && (
-                <div className="faq-content">
-                  Deleting a link removes it permanently from your dashboard, purges its cache, and stops redirection immediately. Anyone who opens the deleted link will see our friendly link not found page.
-                </div>
-              )}
-            </div>
-
-            <div className="faq-item">
-              <button 
-                className="faq-trigger" 
-                onClick={() => setOpenFaq(openFaq === 7 ? null : 7)}
-                aria-expanded={openFaq === 7}
-              >
-                <span>Who can see my click statistics?</span>
-                <ChevronDown size={18} className={`faq-icon ${openFaq === 7 ? 'open' : ''}`} />
-              </button>
-              {openFaq === 7 && (
                 <div className="faq-content">
                   Only you can see your click statistics. Analytics are strictly private to the account that created the link.
                 </div>
@@ -836,12 +1070,12 @@ export default function App() {
             </div>
           </section>
 
-          {/* Final Call to Action Band */}
+          {/* Final Call to Action */}
           <section className="final-cta-band">
             <div className="final-cta-inner">
               <h2 className="final-cta-title">Your next link, shorter.</h2>
               <p className="final-cta-sub">
-                Paste a long link and try LinkBee in one second. No credit card, no password.
+                Paste a long link and try LinkBee in one second. No credit card required.
               </p>
               <button 
                 onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} 
@@ -856,7 +1090,7 @@ export default function App() {
       )}
 
       {/* =========================================================================
-          PAGE: DASHBOARD (Dub-Style Precision)
+          PAGE: DASHBOARD
           ========================================================================= */}
       {currentPage === 'dashboard' && currentUser && (
         <div className="dashboard-layout">
@@ -885,8 +1119,13 @@ export default function App() {
             </div>
 
             <div style={{ borderTop: '1px solid #E7E4DC', paddingTop: '16px' }}>
-              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#1C1B19' }}>{currentUser.name}</div>
-              <div style={{ fontSize: '0.78rem', color: '#8F8D87' }}>{currentUser.email}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                <img src={currentUser.avatarUrl} alt="" style={{ width: '24px', height: '24px', borderRadius: '50%' }} />
+                <span style={{ fontSize: '0.86rem', fontWeight: 600, color: '#1C1B19' }}>@{currentUser.username}</span>
+              </div>
+              <div style={{ fontSize: '0.76rem', color: '#8F8D87' }}>
+                {currentUser.isVerified ? '✓ Verified Account (Unlimited)' : `${currentUser.linkCount || userLinks.length} / 5 Links Used`}
+              </div>
             </div>
           </aside>
 
@@ -918,7 +1157,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Links Table (Container with 1px border, not floating cards) */}
+            {/* Links Table */}
             {userLinks.length === 0 ? (
               <div style={{ background: '#FFFFFF', border: '1px solid #E7E4DC', borderRadius: '12px', padding: '64px 24px', textAlign: 'center' }}>
                 <EmptyTraySpot size={72} />
@@ -988,7 +1227,7 @@ export default function App() {
               </div>
             )}
 
-            {/* In-Line Analytics Details Modal/Drawer */}
+            {/* In-Line Analytics Details */}
             {selectedLinkSlug && analyticsData && (
               <div style={{ marginTop: '36px', background: '#FFFFFF', border: '1px solid #E7E4DC', borderRadius: '12px', padding: '24px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #E7E4DC', paddingBottom: '12px' }}>
@@ -1037,21 +1276,38 @@ export default function App() {
         <main style={{ maxWidth: '640px', margin: '48px auto', padding: '0 24px', flex: 1 }}>
           <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: '8px' }}>Account Settings</h1>
           <p style={{ fontSize: '0.9rem', color: '#63615C', marginBottom: '32px' }}>
-            Manage your personal profile and session details.
+            Manage your personal profile and email verification status.
           </p>
 
           <div style={{ background: '#FFFFFF', border: '1px solid #E7E4DC', borderRadius: '12px', padding: '24px', marginBottom: '24px' }}>
             <div style={{ marginBottom: '16px' }}>
-              <label className="form-label">Full Name</label>
-              <div style={{ fontSize: '0.95rem', fontWeight: 500 }}>{currentUser.name}</div>
+              <label className="form-label">Username</label>
+              <div style={{ fontSize: '0.95rem', fontWeight: 600 }}>@{currentUser.username}</div>
             </div>
             <div style={{ marginBottom: '16px' }}>
               <label className="form-label">Email Address</label>
               <div style={{ fontSize: '0.95rem', fontWeight: 500 }}>{currentUser.email}</div>
             </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label className="form-label">Email Verification Status</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                <span className={`mini-btn-chip`} style={{ background: currentUser.isVerified ? '#15803D' : '#D97706' }}>
+                  {currentUser.isVerified ? 'Verified (Unlimited Short Links)' : 'Unverified (Max 5 Short Links)'}
+                </span>
+                {!currentUser.isVerified && (
+                  <button onClick={handleResendVerification} disabled={resendingEmail} className="btn btn-secondary" style={{ padding: '3px 10px', fontSize: '0.8rem', minHeight: 'auto' }}>
+                    {resendingEmail ? 'Sending...' : 'Resend Verification Email'}
+                  </button>
+                )}
+              </div>
+            </div>
             <div>
-              <label className="form-label">Authentication Method</label>
-              <div style={{ fontSize: '0.85rem', color: '#63615C' }}>Google OAuth 2.0</div>
+              <label className="form-label">Links Created</label>
+              <div style={{ fontSize: '0.85rem', color: '#63615C' }}>
+                {currentUser.isVerified 
+                  ? `${currentUser.linkCount || userLinks.length} short links created (Unlimited plan)`
+                  : `${currentUser.linkCount || userLinks.length} of 5 free short links used`}
+              </div>
             </div>
           </div>
 
@@ -1097,7 +1353,7 @@ export default function App() {
       )}
 
       {/* =========================================================================
-          PAGE: LEGAL & INFO (Terms, Privacy, Report a Link)
+          PAGE: LEGAL & INFO
           ========================================================================= */}
       {(currentPage === 'terms' || currentPage === 'privacy' || currentPage === 'report') && (
         <main style={{ maxWidth: '680px', margin: '64px auto', padding: '0 24px', flex: 1 }}>
@@ -1109,9 +1365,8 @@ export default function App() {
                 <p>Welcome to LinkBee. By accessing or using our URL shortening service, you agree to comply with these terms.</p>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#1C1B19' }}>1. Acceptable Use</h3>
                 <p>LinkBee may only be used for lawful purposes. You agree not to shorten links leading to malware, credential phishing, illegal content, or unauthorized network scanning.</p>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#1C1B19' }}>2. Service Availability</h3>
-                <p>We strive for high uptime and rapid redirection. However, LinkBee is provided on an "as is" and "as available" basis without warranty of any kind.</p>
-                <p style={{ fontSize: '0.82rem', color: '#8F8D87' }}>{/* TODO: Legal counsel review recommended */}</p>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#1C1B19' }}>2. Account Plans & Fair Use</h3>
+                <p>Guest users receive 1 trial short link. Registered users receive 5 short links on signup, and unlock unlimited short links upon verifying their email address.</p>
               </div>
             </article>
           )}
@@ -1125,7 +1380,7 @@ export default function App() {
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#1C1B19' }}>Zero IP Address Storage</h3>
                 <p>When someone clicks a short link, we record the timestamp, the referring website header (if provided), and the browser family. We do NOT store client IP addresses in our analytics database.</p>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#1C1B19' }}>Account Information</h3>
-                <p>When you sign in with Google, we store your name, email address, and profile picture purely to maintain your account and associate your links with you.</p>
+                <p>When you register with username, email and password, passwords are cryptographically salted and hashed using bcrypt. Email addresses are used strictly for account authentication and verification.</p>
               </div>
             </article>
           )}
@@ -1143,7 +1398,7 @@ export default function App() {
                 </div>
                 <div style={{ marginBottom: '20px' }}>
                   <label className="form-label">Reason for Report</label>
-                  <textarea className="form-input" rows={4} placeholder="Describe the violation (e.g. phishing page impersonating a bank)..." />
+                  <textarea className="form-input" rows={4} placeholder="Describe the violation (e.g. phishing page)..." />
                 </div>
                 <button 
                   onClick={() => showToast('Thank you. Link report submitted for review.')} 
@@ -1170,7 +1425,11 @@ export default function App() {
         <div className="modal-backdrop" onClick={() => setIsCreateDialogOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <h2 className="modal-title">Create a new short link</h2>
-            <p className="modal-desc">Enter your destination web address and optional custom back-half.</p>
+            <p className="modal-desc">
+              {currentUser && !currentUser.isVerified
+                ? `You have used ${currentUser.linkCount || userLinks.length} of 5 free links. Verify your email for unlimited links.`
+                : 'Enter your destination web address and optional custom back-half.'}
+            </p>
 
             <form onSubmit={async (e) => {
               e.preventDefault();
@@ -1246,7 +1505,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Footer (Calm & Compact) */}
+      {/* Footer */}
       <footer className="site-footer">
         <div className="site-footer-inner">
           <div className="footer-copy">

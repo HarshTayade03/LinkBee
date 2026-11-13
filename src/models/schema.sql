@@ -1,14 +1,22 @@
--- Database Schema for URL Shortener with Google OAuth
+-- Database Schema for LinkBee URL Shortener
 
--- Users Table (Google OAuth)
+-- Users Table (Email & Password + Username + Verification)
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
-    google_id VARCHAR(128) NOT NULL UNIQUE,
+    username VARCHAR(64) NOT NULL UNIQUE,
     email VARCHAR(255) NOT NULL UNIQUE,
-    name VARCHAR(255) NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    verification_token VARCHAR(128) NULL,
+    verification_expires_at TIMESTAMPTZ NULL,
     avatar_url TEXT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Index for username and email lookups
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_verification_token ON users(verification_token);
 
 -- URLs Table
 CREATE TABLE IF NOT EXISTS urls (

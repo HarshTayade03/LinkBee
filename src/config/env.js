@@ -7,7 +7,12 @@ const config = {
   databaseUrl: process.env.DATABASE_URL,
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6380',
   jwtSecret: process.env.JWT_SECRET || 'dev_jwt_secret_fallback_do_not_use_in_prod',
-  googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+  smtpHost: process.env.SMTP_HOST || '',
+  smtpPort: parseInt(process.env.SMTP_PORT, 10) || 587,
+  smtpSecure: process.env.SMTP_SECURE === 'true',
+  smtpUser: process.env.SMTP_USER || '',
+  smtpPass: process.env.SMTP_PASS || '',
+  smtpFrom: process.env.SMTP_FROM || '"LinkBee" <noreply@linkbee.co>',
 };
 
 if (!config.databaseUrl) {

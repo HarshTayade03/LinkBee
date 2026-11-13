@@ -4,6 +4,7 @@ const urlService = require('../services/urlService');
 const analyticsService = require('../services/analyticsService');
 const cacheService = require('../services/cacheService');
 const config = require('../config/env');
+const userService = require('../services/userService');
 const { validateShortenRequest } = require('../middlewares/validate');
 const { createRateLimiter } = require('../middlewares/rateLimiter');
 const { optionalAuth, requireAuth } = require('../middlewares/auth');
@@ -18,17 +19,17 @@ const shortenRateLimiter = createRateLimiter({
 
 /**
  * POST /api/v1/shorten
- * Business Rule:
- * - If unauthenticated (req.user is null): user can create ONLY 1 link per IP (free trial).
- *   Attempting to create a second link returns HTTP 403 (Sign in with Google required).
- * - If authenticated (req.user is present): unlimited links, associated with user account.
+ * Business Rules:
+ * - Unauthenticated (Guest): exactly 1 free anonymous link per IP.
+ * - Authenticated Unverified User: up to 5 short links maximum.
+ * - Authenticated Verified User: UNLIMITED short links.
  */
 router.post('/shorten', optionalAuth, shortenRateLimiter, validateShortenRequest, async (req, res) => {
   try {
     const { originalUrl, customAlias, expiresAt } = req.body;
     const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
 
-    // Enforcement of 1 free anonymous link rule:
+    // 1. Enforcement of 1 free anonymous link rule for guests:
     if (!req.user) {
       const anonKey = `anon:created:${clientIp}`;
       if (redis) {
@@ -38,7 +39,23 @@ router.post('/shorten', optionalAuth, shortenRateLimiter, validateShortenRequest
             success: false,
             error: {
               code: 'AUTH_REQUIRED_LIMIT',
-              message: 'You have used your 1 free anonymous link! Please sign in with Google to create and manage more links.',
+              message: 'You have used your 1 free anonymous link! Create a free account to make 5 short links, or verify your email for unlimited links.',
+            },
+          });
+        }
+      }
+    } else {
+      // 2. Enforcement for logged-in users:
+      // If user is not verified, check if they reached their 5 link limit
+      const user = await userService.getUserById(req.user.id);
+      if (user && !user.is_verified) {
+        const linkCount = await userService.getUserLinkCount(user.id);
+        if (linkCount >= 5) {
+          return res.status(403).json({
+            success: false,
+            error: {
+              code: 'VERIFICATION_REQUIRED_LIMIT',
+              message: 'You have reached your 5 free links limit! Please verify your email to unlock unlimited short links.',
             },
           });
         }

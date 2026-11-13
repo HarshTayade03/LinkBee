@@ -15,18 +15,15 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "https://accounts.google.com"], // Allow Google OAuth script
-        frameSrc: ["'self'", "https://accounts.google.com"],  // Allow Google One Tap iframe
-        styleSrc: ["'self'", "'unsafe-inline'", "https://accounts.google.com"],
-        imgSrc: ["'self'", "data:", "https://*.googleusercontent.com", "https://api.dicebear.com"],
-        connectSrc: ["'self'", "https://accounts.google.com"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https://api.dicebear.com"],
+        connectSrc: ["'self'"],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
       },
     },
-    crossOriginEmbedderPolicy: false,
-    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' }, // Required for Google Sign-In popup
   })
 );
 
@@ -70,6 +67,14 @@ app.get('/health', (req, res) => {
 // Mount Routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1', apiRoutes);
+
+// SPA fallback for frontend client routing (/verify-email, etc.)
+if (fs.existsSync(reactDistPath)) {
+  app.get('/verify-email', (req, res) => {
+    res.sendFile(path.join(reactDistPath, 'index.html'));
+  });
+}
+
 app.use('/', redirectRoutes);
 
 // 404 handler for unmatched routes

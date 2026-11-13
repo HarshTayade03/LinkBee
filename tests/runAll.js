@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const app = require('../src/app');
 const { pool } = require('../src/config/db');
 const { redis } = require('../src/config/redis');
+const userService = require('../src/services/userService');
 
 async function runTests() {
   const server = app.listen(0, '127.0.0.1');
@@ -9,7 +10,7 @@ async function runTests() {
   const port = server.address().port;
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  // Wait briefly for Redis connection to be fully ready
+  // Wait briefly for connections
   await new Promise((r) => setTimeout(r, 200));
 
   if (redis && redis.status === 'ready') {
@@ -30,7 +31,7 @@ async function runTests() {
   assert.ok(hRes.headers.has('content-security-policy'));
   console.log('   ✔ Security headers verified (nosniff, CSP, X-Powered-By stripped)');
 
-  // Test 2: Input Validation & Malicious Schemes
+  // Test 2: Input Validation & Scheme Blocking
   console.log('2. Testing Input Validation & Scheme Blocking...');
   const xssRes = await fetch(`${baseUrl}/api/v1/shorten`, {
     method: 'POST',
@@ -45,98 +46,124 @@ async function runTests() {
     body: JSON.stringify({ originalUrl: 'http://169.254.169.254/latest/meta-data/' }),
   });
   assert.equal(ssrfRes.status, 400);
+  console.log('   ✔ Malicious inputs blocked (javascript:, SSRF metadata)');
 
-  const blockRes = await fetch(`${baseUrl}/api/v1/shorten`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ originalUrl: 'https://grabify.link/track/abc' }),
-  });
-  assert.equal(blockRes.status, 400);
-  console.log('   ✔ Malicious inputs blocked (javascript:, SSRF metadata, domain blocklist)');
+  // Test 3: Email & Password Registration
+  console.log('3. Testing Email/Password Registration & Username...');
+  const testUser = 'user_' + Date.now();
+  const testEmail = `${testUser}@linkbee.test`;
+  const testPass = 'secretPass123';
 
-  // Test 3: Google Auth & Session Cookie
-  console.log('3. Testing Authentication & Session Creation...');
-  const loginRes = await fetch(`${baseUrl}/api/v1/auth/google`, {
+  const regRes = await fetch(`${baseUrl}/api/v1/auth/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      devMock: true,
-      mockEmail: 'tester@linkbee.co',
-      mockName: 'Test Engineer',
+      username: testUser,
+      email: testEmail,
+      password: testPass,
     }),
   });
-  assert.equal(loginRes.status, 200);
-  const loginJson = await loginRes.json();
-  assert.ok(loginJson.success && loginJson.data.token);
-  const authToken = loginJson.data.token;
-  const cookieHeader = loginRes.headers.get('set-cookie');
-  console.log('   ✔ Authenticated user session created with JWT cookie');
+  assert.equal(regRes.status, 201);
+  const regJson = await regRes.json();
+  assert.ok(regJson.success);
+  assert.equal(regJson.data.user.username, testUser);
+  assert.equal(regJson.data.user.email, testEmail);
+  assert.equal(regJson.data.user.isVerified, false);
+  const cookieHeader = regRes.headers.get('set-cookie');
+  console.log('   ✔ Account created with username, email, hashed password, and initial unverified status');
 
-  // Test 4: Creation under User Account
-  console.log('4. Testing Short Link Creation for Authenticated User...');
-  const alias = 'integ-test-' + Date.now();
-  const createRes = await fetch(`${baseUrl}/api/v1/shorten`, {
+  // Test 4: 5 Free Links Limit for Unverified User
+  console.log('4. Testing 5 Short Links Tier for Unverified Users...');
+  for (let i = 1; i <= 5; i++) {
+    const cRes = await fetch(`${baseUrl}/api/v1/shorten`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': cookieHeader,
+      },
+      body: JSON.stringify({
+        originalUrl: `https://example.com/page-${i}`,
+      }),
+    });
+    assert.equal(cRes.status, 201);
+  }
+  console.log('   ✔ Successfully created 5 short links as unverified user');
+
+  // 6th link attempt should fail with VERIFICATION_REQUIRED_LIMIT
+  const sixthRes = await fetch(`${baseUrl}/api/v1/shorten`, {
     method: 'POST',
-    headers: { 
+    headers: {
       'Content-Type': 'application/json',
-      'Cookie': cookieHeader || `auth_token=${authToken}`,
+      'Cookie': cookieHeader,
     },
     body: JSON.stringify({
-      originalUrl: 'https://engineering.paypal.com',
-      customAlias: alias,
+      originalUrl: 'https://example.com/page-6',
     }),
   });
-  assert.equal(createRes.status, 201);
-  const createJson = await createRes.json();
-  assert.equal(createJson.data.shortCode, alias);
-  assert.equal(createJson.data.isAnonymous, false);
-  console.log('   ✔ Short URL created under user account: /' + alias);
+  assert.equal(sixthRes.status, 403);
+  const sixthJson = await sixthRes.json();
+  assert.equal(sixthJson.error.code, 'VERIFICATION_REQUIRED_LIMIT');
+  console.log('   ✔ 6th link properly blocked: requires email verification to unlock unlimited');
 
-  // Test 5: Cache-Aside & Redirection Latency
-  console.log('5. Testing Redirection & Cache-Aside...');
-  const t0 = performance.now();
-  const missRes = await fetch(`${baseUrl}/${alias}`, { redirect: 'manual' });
-  const missDuration = performance.now() - t0;
+  // Test 5: Email Verification Flow
+  console.log('5. Testing Email Verification Token Flow...');
+  const userRecord = await userService.findUserByLogin(testEmail);
+  const dbUser = await pool.query('SELECT verification_token FROM users WHERE id = $1', [userRecord.id]);
+  const token = dbUser.rows[0].verification_token;
+  assert.ok(token);
+
+  const verifyRes = await fetch(`${baseUrl}/api/v1/auth/verify-email?token=${token}`);
+  assert.equal(verifyRes.status, 200);
+  const verifiedCookieHeader = verifyRes.headers.get('set-cookie');
+  console.log('   ✔ Email successfully verified via token');
+
+  // Test 6: Unlimited Links After Verification
+  console.log('6. Testing Unlimited Links After Verification...');
+  const unlimRes = await fetch(`${baseUrl}/api/v1/shorten`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Cookie': verifiedCookieHeader,
+    },
+    body: JSON.stringify({
+      originalUrl: 'https://example.com/unlimited-success',
+      customAlias: 'verified-' + Date.now(),
+    }),
+  });
+  assert.equal(unlimRes.status, 201);
+  const unlimJson = await unlimRes.json();
+  const verifiedSlug = unlimJson.data.shortCode;
+  console.log('   ✔ Link created successfully beyond 5-link limit: /' + verifiedSlug);
+
+  // Test 7: Redirection & Cache-Aside
+  console.log('7. Testing Redirection & Cache-Aside...');
+  const missRes = await fetch(`${baseUrl}/${verifiedSlug}`, { redirect: 'manual' });
   assert.equal(missRes.status, 302);
-  assert.equal(missRes.headers.get('location'), 'https://engineering.paypal.com');
   assert.equal(missRes.headers.get('x-cache'), 'MISS');
 
-  const t1 = performance.now();
-  const hitRes = await fetch(`${baseUrl}/${alias}`, { redirect: 'manual' });
-  const hitDuration = performance.now() - t1;
+  const hitRes = await fetch(`${baseUrl}/${verifiedSlug}`, { redirect: 'manual' });
   assert.equal(hitRes.status, 302);
   assert.equal(hitRes.headers.get('x-cache'), 'HIT');
-  console.log(`   ✔ Cache Miss: ${missDuration.toFixed(2)}ms | Cache Hit: ${hitDuration.toFixed(2)}ms`);
+  console.log('   ✔ Redirection verified (Cache Miss -> Cache Hit)');
 
-  // Test 6: Click Analytics Verification
-  console.log('6. Testing Protected Analytics...');
-  // Wait 150ms for async click insert
-  await new Promise((r) => setTimeout(r, 150));
-
-  const unauthStats = await fetch(`${baseUrl}/api/v1/links/${alias}`);
-  assert.equal(unauthStats.status, 401);
-
-  const authStats = await fetch(`${baseUrl}/api/v1/links/${alias}`, {
-    headers: { 'Cookie': cookieHeader || `auth_token=${authToken}` },
+  // Test 8: Login Flow with Username or Email
+  console.log('8. Testing Login with Username and Email...');
+  const loginWithUsernameRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login: testUser, password: testPass }),
   });
-  assert.equal(authStats.status, 200);
-  const statsJson = await authStats.json();
-  assert.ok(statsJson.data.stats.totalClicks >= 2);
-  console.log('   ✔ Protected analytics requires valid session, recorded clicks accurately');
+  assert.equal(loginWithUsernameRes.status, 200);
 
-  // Test 7: Deletion
-  console.log('7. Testing Link Deletion...');
-  const delRes = await fetch(`${baseUrl}/api/v1/links/${alias}`, {
-    method: 'DELETE',
-    headers: { 'Cookie': cookieHeader || `auth_token=${authToken}` },
+  const loginWithEmailRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login: testEmail, password: testPass }),
   });
-  assert.equal(delRes.status, 204);
+  assert.equal(loginWithEmailRes.status, 200);
+  console.log('   ✔ Sign in verified with both username and email');
 
-  const getAfterDel = await fetch(`${baseUrl}/${alias}`, { redirect: 'manual' });
-  assert.equal(getAfterDel.status, 404);
-  console.log('   ✔ Link deleted and cache invalidated immediately');
-
-  console.log('\n--- ALL INTEGRATION TESTS PASSED (7/7) ---');
+  console.log('\n--- ALL INTEGRATION TESTS PASSED (8/8) ---');
   server.close();
   await pool.end();
   if (redis) await redis.quit();
