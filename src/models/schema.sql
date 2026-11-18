@@ -43,3 +43,16 @@ CREATE TABLE IF NOT EXISTS clicks (
 
 -- Composite index for fast URL-filtered, time-ordered analytics queries
 CREATE INDEX IF NOT EXISTS idx_clicks_url_id_clicked_at ON clicks(url_id, clicked_at DESC);
+
+-- Public abuse reports. Reporter IP addresses are intentionally not persisted.
+CREATE TABLE IF NOT EXISTS link_reports (
+    id BIGSERIAL PRIMARY KEY,
+    reported_url TEXT NOT NULL,
+    reason VARCHAR(32) NOT NULL CHECK (reason IN ('phishing', 'malware', 'spam', 'illegal-content', 'other')),
+    details VARCHAR(1000) NULL,
+    reporter_user_id BIGINT NULL REFERENCES users(id) ON DELETE SET NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'reviewed', 'closed')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_link_reports_status_created_at ON link_reports(status, created_at DESC);

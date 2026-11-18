@@ -17,7 +17,13 @@ import {
   Mail,
   Lock,
   RefreshCw,
-  Search
+  Search,
+  Route,
+  SlidersHorizontal,
+  Clock3,
+  LockKeyhole,
+  LayoutDashboard,
+  MousePointer2
 } from 'lucide-react';
 import logoImg from './assets/logo.jpg';
 
@@ -65,6 +71,14 @@ export default function App() {
 
   // FAQ Accordion state
   const [openFaq, setOpenFaq] = useState(null);
+
+  // Abuse report form state
+  const [reportUrl, setReportUrl] = useState('');
+  const [reportReason, setReportReason] = useState('phishing');
+  const [reportDetails, setReportDetails] = useState('');
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportError, setReportError] = useState('');
+  const [reportSuccess, setReportSuccess] = useState(false);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -328,6 +342,38 @@ export default function App() {
     setComposerError('');
   };
 
+  const handleReportSubmit = async (event) => {
+    event.preventDefault();
+    setReportError('');
+    setReportSuccess(false);
+    setReportSubmitting(true);
+
+    try {
+      const res = await fetch('/api/v1/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reportedUrl: reportUrl,
+          reason: reportReason,
+          details: reportDetails,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setReportError(data.error?.message || 'We could not submit that report. Please try again.');
+        return;
+      }
+      setReportSuccess(true);
+      setReportUrl('');
+      setReportReason('phishing');
+      setReportDetails('');
+    } catch {
+      setReportError('Network connection issue. Please try again.');
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
+
   const filteredLinks = userLinks.filter((l) => 
     l.shortCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
     l.originalUrl.toLowerCase().includes(searchQuery.toLowerCase())
@@ -354,6 +400,14 @@ export default function App() {
             <img src={logoImg} alt="LinkBee" className="brand-mark" />
             <span className="brand-wordmark">LinkBee</span>
           </a>
+
+          {currentPage === 'landing' && (
+            <nav className="nav-links" aria-label="Main navigation">
+              <a href="#features">Product</a>
+              <a href="#questions">FAQ</a>
+              <a href="#shorten">Shorten a link</a>
+            </nav>
+          )}
 
           <div className="nav-actions">
             {authLoading ? (
@@ -580,21 +634,21 @@ export default function App() {
       {currentPage === 'landing' && (
         <main>
           {/* Hero Section */}
-          <section className="hero-wrapper">
+          <section className="hero-wrapper" id="shorten">
             <div className="hero-grid">
               {/* Left Column: Headline, Clear Benefit, and Primary Input */}
               <div className="hero-content">
-                <div className="signature-pill">
-                  <span className="signature-dot" />
-                  <span>Privacy-first link shortener</span>
+                <div className="hero-brand-lockup">
+                  <img src={logoImg} alt="" />
+                  <span>LinkBee</span>
                 </div>
 
                 <h1 className="hero-title">
-                  Make long links short. See who clicks.
+                  Make every link feel like it belongs.
                 </h1>
 
                 <p className="hero-description">
-                  Paste any web address to generate a short link in a second. Your first link is free with no account required.
+                  Create a simple, memorable URL for the things you send. Keep it organised, give it an ending people recognise, and see its private click history when you need it.
                 </p>
 
                 {/* Main Link Input Card */}
@@ -734,70 +788,38 @@ export default function App() {
                 )}
               </div>
 
-              {/* Right Column: The Bright Element (Real Product Terminal) */}
-              <div className="hero-terminal">
-                <div className="terminal-header">
-                  <div className="terminal-badge">
-                    <span className="signature-dot" />
-                    <span>linkbee.co/workshop-rsvp</span>
-                  </div>
-                  <span className="terminal-label">Real-time stats</span>
+              <div className="hero-product-card">
+                <div className="product-card-chrome">
+                  <div className="product-card-brand"><img src={logoImg} alt="" /> LinkBee</div>
+                  <span>New short link</span>
                 </div>
-
-                <div className="terminal-metric-row">
-                  <div className="terminal-big-num">248</div>
-                  <div className="terminal-metric-caption">clicks over the last 30 days</div>
+                <div className="product-card-body">
+                  <div className="product-icon"><Link2 size={22} /></div>
+                  <div>
+                    <span className="product-label">A familiar link, simplified</span>
+                    <strong>linkbee.co/your-link</strong>
+                  </div>
+                  <div className="product-route"><span>Destination</span><span className="route-line" /><span>Shared</span></div>
                 </div>
-
-                {/* 7-Day Histogram (Lead bar highlighted with warm honey accent) */}
-                <div className="terminal-chart">
-                  <div className="chart-column"><div className="chart-bar" style={{ height: '24%' }} /><span className="chart-date-label">Mon</span></div>
-                  <div className="chart-column"><div className="chart-bar" style={{ height: '42%' }} /><span className="chart-date-label">Tue</span></div>
-                  <div className="chart-column"><div className="chart-bar" style={{ height: '36%' }} /><span className="chart-date-label">Wed</span></div>
-                  <div className="chart-column"><div className="chart-bar lead" style={{ height: '88%' }} /><span className="chart-date-label">Thu</span></div>
-                  <div className="chart-column"><div className="chart-bar" style={{ height: '60%' }} /><span className="chart-date-label">Fri</span></div>
-                  <div className="chart-column"><div className="chart-bar" style={{ height: '28%' }} /><span className="chart-date-label">Sat</span></div>
-                  <div className="chart-column"><div className="chart-bar" style={{ height: '35%' }} /><span className="chart-date-label">Sun</span></div>
-                </div>
-
-                {/* Top Traffic Sources */}
-                <div className="terminal-sources-list">
-                  <div style={{ fontSize: '0.72rem', fontFamily: 'monospace', color: '#8A857B', textTransform: 'uppercase' }}>
-                    Top Referrers
-                  </div>
-                  <div className="source-item">
-                    <span className="source-name">Direct / Email</span>
-                    <span className="source-count">112 clicks</span>
-                  </div>
-                  <div className="source-item">
-                    <span className="source-name">linkedin.com</span>
-                    <span className="source-count">74 clicks</span>
-                  </div>
-                  <div className="source-item">
-                    <span className="source-name">twitter.com</span>
-                    <span className="source-count">48 clicks</span>
-                  </div>
+                <div className="product-card-footer">
+                  <span>Custom ending</span>
+                  <span>Optional expiry</span>
+                  <span>Private analytics</span>
                 </div>
               </div>
             </div>
           </section>
 
           {/* Feature Tiles Section */}
-          <section className="section-wrapper">
+          <section className="section-wrapper" id="features">
             <div className="section-head">
-              <div className="section-eyebrow">Features</div>
-              <h2 className="section-heading">Built for clear sharing and honest tracking</h2>
+              <div className="section-eyebrow">What LinkBee does</div>
+              <h2 className="section-heading">The useful parts of a link, without the clutter</h2>
             </div>
 
             <div className="features-grid">
-              {/* Tile 1 */}
               <div className="feature-tile">
-                <div className="feature-preview">
-                  <div style={{ background: '#FFFFFF', border: '1px solid #E8E5DD', borderRadius: '6px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', fontWeight: 500 }}>linkbee.co/r7x2k9</span>
-                    <span style={{ background: '#1C1B19', color: '#FFFFFF', fontSize: '0.68rem', padding: '2px 6px', borderRadius: '4px' }}>Copy</span>
-                  </div>
-                </div>
+                <div className="feature-icon"><Route size={21} /></div>
                 <h3 className="feature-title">Shorten any link</h3>
                 <p className="feature-desc">Paste a long link, get a clean short address you can share anywhere.</p>
                 <a href="#top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="feature-action-link">
@@ -806,47 +828,28 @@ export default function App() {
                 </a>
               </div>
 
-              {/* Tile 2 */}
               <div className="feature-tile">
-                <div className="feature-preview">
-                  <span style={{ background: '#FEF3C7', border: '1px solid #FDE68A', color: '#92400E', fontFamily: 'monospace', fontSize: '0.82rem', padding: '4px 10px', borderRadius: '9999px' }}>
-                    linkbee.co/summer-sale
-                  </span>
-                </div>
+                <div className="feature-icon"><SlidersHorizontal size={21} /></div>
                 <h3 className="feature-title">Choose your own ending</h3>
-                <p className="feature-desc">Turn a messy link into something people remember, like linkbee.co/summer-sale.</p>
+                <p className="feature-desc">Turn a messy destination into a short address people can recognise and trust.</p>
                 <a href="#top" onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); setShowOptions(true); }} className="feature-action-link">
                   <span>Pick a back-half</span>
                   <ArrowRight size={14} />
                 </a>
               </div>
 
-              {/* Tile 3 */}
               <div className="feature-tile">
-                <div className="feature-preview">
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', height: '48px', width: '120px' }}>
-                    <div style={{ flex: 1, height: '30%', background: '#D4D0C5', borderRadius: '2px 2px 0 0' }} />
-                    <div style={{ flex: 1, height: '55%', background: '#D4D0C5', borderRadius: '2px 2px 0 0' }} />
-                    <div style={{ flex: 1, height: '85%', background: '#D97706', borderRadius: '2px 2px 0 0' }} />
-                    <div style={{ flex: 1, height: '45%', background: '#D4D0C5', borderRadius: '2px 2px 0 0' }} />
-                  </div>
-                </div>
+                <div className="feature-icon"><MousePointer2 size={21} /></div>
                 <h3 className="feature-title">See who clicks</h3>
-                <p className="feature-desc">Watch clicks come in over time and see where your visitors come from.</p>
+                <p className="feature-desc">See each link’s click history and referrer information from your private dashboard.</p>
                 <button onClick={() => { setAuthMode('signup'); setCurrentPage('auth'); }} className="feature-action-link">
                   <span>View click stats</span>
                   <ArrowRight size={14} />
                 </button>
               </div>
 
-              {/* Tile 4 */}
               <div className="feature-tile">
-                <div className="feature-preview">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#FFFFFF', padding: '6px 12px', borderRadius: '6px', border: '1px solid #E8E5DD' }}>
-                    <Calendar size={15} color="#D97706" />
-                    <span style={{ fontSize: '0.82rem', fontFamily: 'monospace' }}>Ends: Nov 30, 2026</span>
-                  </div>
-                </div>
+                <div className="feature-icon"><Clock3 size={21} /></div>
                 <h3 className="feature-title">Set it to expire</h3>
                 <p className="feature-desc">Pick a date and the link switches itself off. Good for offers and events.</p>
                 <a href="#top" onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); setShowOptions(true); }} className="feature-action-link">
@@ -855,14 +858,8 @@ export default function App() {
                 </a>
               </div>
 
-              {/* Tile 5 */}
               <div className="feature-tile">
-                <div className="feature-preview">
-                  <div style={{ width: '100%', maxWidth: '180px', background: '#FFFFFF', border: '1px solid #E8E5DD', borderRadius: '6px', padding: '8px 10px' }}>
-                    <div style={{ fontSize: '0.78rem', fontWeight: 500, color: '#1C1B19' }}>/launch-deck</div>
-                    <div style={{ fontSize: '0.78rem', fontWeight: 500, color: '#1C1B19', marginTop: '2px' }}>/newsletter-nov</div>
-                  </div>
-                </div>
+                <div className="feature-icon"><LayoutDashboard size={21} /></div>
                 <h3 className="feature-title">Keep it all in one place</h3>
                 <p className="feature-desc">Search, copy and clean up every link from a single dashboard.</p>
                 <button onClick={() => { setAuthMode('login'); setCurrentPage('auth'); }} className="feature-action-link">
@@ -871,14 +868,8 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Tile 6 */}
               <div className="feature-tile">
-                <div className="feature-preview">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#FFFFFF', padding: '6px 12px', borderRadius: '6px', border: '1px solid #E8E5DD' }}>
-                    <Shield size={15} color="#16A34A" />
-                    <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>Zero IP logging</span>
-                  </div>
-                </div>
+                <div className="feature-icon"><LockKeyhole size={21} /></div>
                 <h3 className="feature-title">Privacy first</h3>
                 <p className="feature-desc">We record click counts and sources without storing IP addresses or personal data.</p>
                 <button onClick={() => setCurrentPage('privacy')} className="feature-action-link">
@@ -890,7 +881,7 @@ export default function App() {
           </section>
 
           {/* FAQ Accordion */}
-          <section className="faq-container">
+          <section className="faq-container" id="questions">
             <div className="section-head" style={{ textAlign: 'center', margin: '0 auto 32px auto' }}>
               <div className="section-eyebrow">FAQ</div>
               <h2 className="section-heading">Frequently asked questions</h2>
@@ -1315,24 +1306,49 @@ export default function App() {
             <article>
               <h1 style={{ fontSize: '1.8rem', fontWeight: 600, marginBottom: '8px' }}>Report an Abusive Link</h1>
               <p style={{ fontSize: '0.88rem', color: '#5E5B54', marginBottom: '28px' }}>
-                We investigate every reported link to keep LinkBee safe from phishing, malware, and spam.
+                Tell us about a LinkBee link that may be unsafe. We review reports manually and do not store your IP address with this form.
               </p>
-              <div style={{ background: '#FFFFFF', border: '1px solid var(--border-subtle)', borderRadius: '12px', padding: '24px' }}>
+              <form onSubmit={handleReportSubmit} style={{ background: '#FFFFFF', border: '1px solid var(--border-subtle)', borderRadius: '12px', padding: '24px' }}>
                 <div style={{ marginBottom: '16px' }}>
                   <label className="form-label">Suspect Short Link</label>
-                  <input type="text" className="form-input" placeholder="https://linkbee.co/abc1234" />
+                  <input
+                    type="url"
+                    className="form-input"
+                    placeholder="https://linkbee.co/abc1234"
+                    value={reportUrl}
+                    onChange={(event) => setReportUrl(event.target.value)}
+                    maxLength={2048}
+                    required
+                  />
+                </div>
+                <div style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Reason for Report</label>
+                  <select className="form-input" value={reportReason} onChange={(event) => setReportReason(event.target.value)}>
+                    <option value="phishing">Phishing or credential theft</option>
+                    <option value="malware">Malware or harmful download</option>
+                    <option value="spam">Spam or deceptive promotion</option>
+                    <option value="illegal-content">Illegal content</option>
+                    <option value="other">Other safety concern</option>
+                  </select>
                 </div>
                 <div style={{ marginBottom: '20px' }}>
-                  <label className="form-label">Reason for Report</label>
-                  <textarea className="form-input" rows={4} style={{ height: 'auto', padding: '10px 12px' }} placeholder="Describe the violation..." />
+                  <label className="form-label">Additional details <span style={{ color: '#8A857B', fontWeight: 400 }}>(optional)</span></label>
+                  <textarea
+                    className="form-input"
+                    rows={4}
+                    style={{ height: 'auto', padding: '10px 12px', resize: 'vertical' }}
+                    placeholder="What happened when you opened this link?"
+                    value={reportDetails}
+                    onChange={(event) => setReportDetails(event.target.value)}
+                    maxLength={1000}
+                  />
                 </div>
-                <button 
-                  onClick={() => showToast('Thank you. Link report submitted for review.')} 
-                  className="btn btn-primary"
-                >
-                  Submit Report
+                {reportError && <div className="error-banner" style={{ marginBottom: '16px' }} role="alert"><AlertCircle size={16} />{reportError}</div>}
+                {reportSuccess && <div className="success-banner" role="status"><Check size={16} />Report received. Our team will review it.</div>}
+                <button type="submit" className="btn btn-primary" disabled={reportSubmitting}>
+                  {reportSubmitting ? 'Submitting…' : 'Submit report'}
                 </button>
-              </div>
+              </form>
             </article>
           )}
 
@@ -1434,28 +1450,32 @@ export default function App() {
       {/* Site Footer */}
       <footer className="site-footer">
         <div className="site-footer-inner">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <img src={logoImg} alt="" style={{ width: '18px', height: '18px', borderRadius: '4px' }} />
-            <span style={{ fontSize: '0.82rem', color: '#5E5B54', fontWeight: 500 }}>LinkBee</span>
+          <div className="footer-brand">
+            <a href="/" className="brand-anchor" onClick={(e) => { e.preventDefault(); setCurrentPage('landing'); }}>
+              <img src={logoImg} alt="LinkBee" className="brand-mark" />
+              <span className="brand-wordmark">LinkBee</span>
+            </a>
+            <p>Clear links for the things worth sharing</p>
+            <span className="footer-copyright">© 2026 LinkBee</span>
             <span className="footer-meta">• Make long links short.</span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div className="footer-links">
             <button 
               onClick={() => setCurrentPage('terms')} 
-              style={{ background: 'none', border: 'none', fontSize: '0.82rem', color: '#8A857B', cursor: 'pointer' }}
+              className="footer-link"
             >
               Terms
             </button>
             <button 
               onClick={() => setCurrentPage('privacy')} 
-              style={{ background: 'none', border: 'none', fontSize: '0.82rem', color: '#8A857B', cursor: 'pointer' }}
+              className="footer-link"
             >
               Privacy
             </button>
             <button 
               onClick={() => setCurrentPage('report')} 
-              style={{ background: 'none', border: 'none', fontSize: '0.82rem', color: '#8A857B', cursor: 'pointer' }}
+              className="footer-link"
             >
               Report a link
             </button>

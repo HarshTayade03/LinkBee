@@ -192,8 +192,50 @@ function validateShortenRequest(req, res, next) {
   next();
 }
 
+/**
+ * Validate a public abuse report without collecting reporter IP addresses.
+ */
+function validateReportRequest(req, res, next) {
+  const { reportedUrl, reason, details } = req.body || {};
+  const allowedReasons = new Set(['phishing', 'malware', 'spam', 'illegal-content', 'other']);
+
+  if (!reportedUrl || typeof reportedUrl !== 'string') {
+    return res.status(400).json({ success: false, error: { code: 'MISSING_REPORTED_URL', message: 'reportedUrl is required.' } });
+  }
+
+  const trimmedUrl = reportedUrl.trim();
+  if (trimmedUrl.length > 2048) {
+    return res.status(400).json({ success: false, error: { code: 'REPORTED_URL_TOO_LONG', message: 'reportedUrl must not exceed 2048 characters.' } });
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(trimmedUrl);
+  } catch {
+    return res.status(400).json({ success: false, error: { code: 'INVALID_REPORTED_URL', message: 'Enter a complete LinkBee URL, including https://.' } });
+  }
+
+  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+    return res.status(400).json({ success: false, error: { code: 'INVALID_REPORTED_URL_SCHEME', message: 'Only http and https links can be reported.' } });
+  }
+
+  if (typeof reason !== 'string' || !allowedReasons.has(reason)) {
+    return res.status(400).json({ success: false, error: { code: 'INVALID_REPORT_REASON', message: 'Choose a valid reason for the report.' } });
+  }
+
+  if (details !== undefined && (typeof details !== 'string' || details.trim().length > 1000)) {
+    return res.status(400).json({ success: false, error: { code: 'INVALID_REPORT_DETAILS', message: 'Details must be 1,000 characters or fewer.' } });
+  }
+
+  req.body.reportedUrl = trimmedUrl;
+  req.body.reason = reason;
+  req.body.details = details ? details.trim() : null;
+  next();
+}
+
 module.exports = {
   validateShortenRequest,
+  validateReportRequest,
   RESERVED_ALIASES,
   BLOCKED_HOSTNAMES,
 };

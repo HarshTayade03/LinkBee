@@ -5,7 +5,8 @@ const analyticsService = require('../services/analyticsService');
 const cacheService = require('../services/cacheService');
 const config = require('../config/env');
 const userService = require('../services/userService');
-const { validateShortenRequest } = require('../middlewares/validate');
+const reportService = require('../services/reportService');
+const { validateShortenRequest, validateReportRequest } = require('../middlewares/validate');
 const { createRateLimiter } = require('../middlewares/rateLimiter');
 const { optionalAuth, requireAuth } = require('../middlewares/auth');
 const { redis } = require('../config/redis');
@@ -15,6 +16,40 @@ const shortenRateLimiter = createRateLimiter({
   windowSeconds: 60,
   maxRequests: 10,
   keyPrefix: 'rl:shorten',
+});
+
+const reportRateLimiter = createRateLimiter({
+  windowSeconds: 60 * 60,
+  maxRequests: 5,
+  keyPrefix: 'rl:report',
+});
+
+/**
+ * POST /api/v1/reports
+ * Record a public abuse report for later review. This deliberately does not
+ * capture reporter IP addresses or promise an automatic takedown.
+ */
+router.post('/reports', optionalAuth, reportRateLimiter, validateReportRequest, async (req, res) => {
+  try {
+    const report = await reportService.createReport({
+      reportedUrl: req.body.reportedUrl,
+      reason: req.body.reason,
+      details: req.body.details,
+      reporterUserId: req.user ? req.user.id : null,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: { id: report.id, createdAt: report.created_at },
+      message: 'Report received. Our team will review it.',
+    });
+  } catch (err) {
+    console.error('Error creating abuse report:', err);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'REPORT_SUBMISSION_FAILED', message: 'We could not submit that report. Please try again.' },
+    });
+  }
 });
 
 /**
